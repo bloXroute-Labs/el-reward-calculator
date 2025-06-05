@@ -1,0 +1,19 @@
+[package]
+name = "el-reward-calculator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+regex = "1.11.0"
+lazy_static = "1.4.0"
+url = "2.5.2"
+chrono = "0.4.38"
+decimal-percentage = "0.1.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+csv = "1.1"
+web3-unit-converter = "0.1.0"
+ethers = "2.0.14"
+uuid = { version = "1.7", features = ["v4"]}
+log = "0.4"
+env_logger = "0.10"
