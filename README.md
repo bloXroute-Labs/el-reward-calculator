@@ -40,10 +40,10 @@ cargo build
 The main entry point for the program is the `main` function in `src/main.rs`. To run the program, use the following command:
 
 ```bash
-cargo run -- <log_file_path> <validator_client_id> [output_format]
+cargo run -- <log_file_path> <validator_client_id_log_format> [output_format]
 ```
 - log_file_path: Path to the log file you want to process.
-- validator_client_id: validators side car client id (either mevboost, commitboost, vouch).
+- validator_client_id log format: validators side car client id log format (either mevboost_text,mevboost_json, commitboost_text,commitboost_json, vouch).
 - output_format (Optional): The format to output the processed data. It can be either json or csv (default is json).
 
 #### **3.1 Example Usage**
