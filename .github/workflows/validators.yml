@@ -1,0 +1,30 @@
+name: Run Linters and Validators
+
+on: [pull_request]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0  
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Fetch develop branch
+        run: git fetch origin develop:refs/remotes/origin/develop
+
+      - name: Install dependencies
+        run: pip install pre-commit
+
+      - name: Run pre-commit diff against develop
+        run: pre-commit run --from-ref origin/develop --to-ref HEAD
+
+      - name: Validate CODEOWNERS
+        uses: mszostok/codeowners-validator@v0.7.4
+        with:
+          checks: "files,duppatterns"
