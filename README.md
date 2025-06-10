@@ -55,6 +55,10 @@ To process json logs and output in JSON:
 ```bash
 cargo run -- path/to/log_file.json commitboost_json json
 ```
+To process json logs and output in JSON for vouch:
+```bash
+cargo run path/to/log_file.json vouch csv
+```
 #### **3.2 Output file path**
 - The output files are stored in a directory structure based on the current date.
 he program automatically creates a folder named using the date in the format DD_MM_YYYY, and then stores the output files within that folder.
