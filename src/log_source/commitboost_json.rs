@@ -80,7 +80,6 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
             if log_entry.message == "received unblinded block" {
                 let block_hash = span.block_hash.clone().unwrap_or_default();
 
-                // Match all requests that contain the block_hash
                 let mut matched_req_ids: Vec<(&String, &CommitBoostRequest)> = slot_info
                     .requests
                     .iter()
@@ -88,8 +87,7 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
                     .collect();
 
                 if !matched_req_ids.is_empty() {
-                    // Sort by highest bid among relays matching the block_hash
-                    matched_req_ids.sort_by(|(_, a), (_, b)| {
+                    matched_req_ids.sort_by(|(aid, a), (bid, b)| {
                         let a_max = a.bids.iter()
                             .filter(|b| b.block_hash == block_hash)
                             .map(|b| b.bid_value)
@@ -98,7 +96,7 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
                             .filter(|b| b.block_hash == block_hash)
                             .map(|b| b.bid_value)
                             .fold(0.0, f64::max);
-                        b_max.total_cmp(&a_max)
+                        b_max.total_cmp(&a_max).then_with(|| aid.cmp(bid))
                     });
 
                     let (best_req_id, _) = matched_req_ids[0];
@@ -125,63 +123,73 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
 }
 
 pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
-    for (_slot, slot_info_map) in slot_infos.iter_mut() {
-        for (_slot_uid, slot_info) in slot_info_map.iter_mut() {
-            let selected_req_id = match &slot_info.selected_req_id {
-                Some(id) => id,
-                None => continue,
-            };
+    let mut slots: Vec<_> = slot_infos.keys().cloned().collect();
+    slots.sort();
 
-            let bidset = match slot_info.requests.get(selected_req_id) {
-                Some(b) => b,
-                None => continue,
-            };
+    for slot in slots {
+        if let Some(slot_info_map) = slot_infos.get_mut(&slot) {
+            let mut slot_uids: Vec<_> = slot_info_map.keys().cloned().collect();
+            slot_uids.sort();
 
-            let mut bids = bidset.bids.clone();
-            if bids.is_empty() {
-                continue;
-            }
+            for slot_uid in slot_uids {
+                if let Some(slot_info) = slot_info_map.get_mut(&slot_uid) {
+                    let selected_req_id = match &slot_info.selected_req_id {
+                        Some(id) => id,
+                        None => continue,
+                    };
 
-            bids.sort_by(|a, b| b.bid_value.total_cmp(&a.bid_value));
-            let highest_bid = &bids[0];
+                    let bidset = match slot_info.requests.get(selected_req_id) {
+                        Some(b) => b,
+                        None => continue,
+                    };
 
-            let winning_bid = bids.iter().find(|b| &b.block_hash == &slot_info.block_hash);
+                    let mut bids = bidset.bids.clone();
+                    if bids.is_empty() {
+                        continue;
+                    }
 
-            if let Some(bid) = winning_bid {
-                let winning_relay = bid.relay.clone();
-                let relay_proxy_won = is_relay_proxy(&winning_relay);
+                    bids.sort_by(|a, b| b.bid_value.total_cmp(&a.bid_value));
+                    let highest_bid = &bids[0];
 
-                slot_info.onchain_bid_delivered_relay = winning_relay.clone();
-                slot_info.onchain_bid_value = bid.bid_value;
-                slot_info.is_proxy_win = relay_proxy_won;
-                slot_info.is_equal_to_proxy_bid = false; // reset
-                slot_info.equal_to_proxy_bidders = String::new();
+                    let winning_bid = bids.iter().find(|b| &b.block_hash == &slot_info.block_hash);
 
-                slot_info.is_winning_bid_highest =
-                    bid.block_hash == highest_bid.block_hash
-                    || bids.iter().any(|b| b.block_hash == bid.block_hash && b.bid_value == highest_bid.bid_value);
+                    if let Some(bid) = winning_bid {
+                        let winning_relay = bid.relay.clone();
+                        let relay_proxy_won = is_relay_proxy(&winning_relay);
 
-                if relay_proxy_won {
-                    let second_best_bid = bids.iter()
-                        .filter(|b| !is_relay_proxy(&b.relay))
-                        .find(|b| b.bid_value < bid.bid_value);
+                        slot_info.onchain_bid_delivered_relay = winning_relay.clone();
+                        slot_info.onchain_bid_value = bid.bid_value;
+                        slot_info.is_proxy_win = relay_proxy_won;
+                        slot_info.is_equal_to_proxy_bid = false;
+                        slot_info.equal_to_proxy_bidders = String::new();
 
-                    slot_info.second_highest_bid_value = second_best_bid.map_or(0.0, |b| b.bid_value);
-                    slot_info.second_higher_bid_delivered_relay = second_best_bid.map_or(String::new(), |b| b.relay.clone());
+                        slot_info.is_winning_bid_highest =
+                            bid.block_hash == highest_bid.block_hash
+                            || bids.iter().any(|b| b.block_hash == bid.block_hash && b.bid_value == highest_bid.bid_value);
 
-                    if slot_info.second_highest_bid_value > 0.0 {
-                        let el_reward_increase = slot_info.onchain_bid_value - slot_info.second_highest_bid_value;
-                        let el_reward_increase_eth = (el_reward_increase * 1e18f64).round() / 1e18f64;
-                        let el_reward_increase_wei: U256 = parse_ether(&format!("{:.18}", el_reward_increase_eth)).unwrap_or_default();
+                        if relay_proxy_won {
+                            let second_best_bid = bids.iter()
+                                .filter(|b| !is_relay_proxy(&b.relay))
+                                .find(|b| b.bid_value < bid.bid_value);
 
-                        let precise_percent = (el_reward_increase / slot_info.onchain_bid_value) * 100.0;
-                        let rounded_percent_precise = (precise_percent * 100.0).round() / 100.0;
-                        let el_reward_increase_percentage = precise_percent.round() as u64;
+                            slot_info.second_highest_bid_value = second_best_bid.map_or(0.0, |b| b.bid_value);
+                            slot_info.second_higher_bid_delivered_relay = second_best_bid.map_or(String::new(), |b| b.relay.clone());
 
-                        slot_info.el_reward_increase_wei = el_reward_increase_wei;
-                        slot_info.el_reward_increase_eth = el_reward_increase_eth;
-                        slot_info.el_reward_increase_percentage = el_reward_increase_percentage;
-                        slot_info.el_reward_increase_percent_precise = rounded_percent_precise;
+                            if slot_info.second_highest_bid_value > 0.0 {
+                                let el_reward_increase = slot_info.onchain_bid_value - slot_info.second_highest_bid_value;
+                                let el_reward_increase_eth = (el_reward_increase * 1e18f64).round() / 1e18f64;
+                                let el_reward_increase_wei: U256 = parse_ether(&format!("{:.18}", el_reward_increase_eth)).unwrap_or_default();
+
+                                let precise_percent = (el_reward_increase / slot_info.onchain_bid_value) * 100.0;
+                                let rounded_percent_precise = (precise_percent * 100.0).round() / 100.0;
+                                let el_reward_increase_percentage = precise_percent.round() as u64;
+
+                                slot_info.el_reward_increase_wei = el_reward_increase_wei;
+                                slot_info.el_reward_increase_eth = el_reward_increase_eth;
+                                slot_info.el_reward_increase_percentage = el_reward_increase_percentage;
+                                slot_info.el_reward_increase_percent_precise = rounded_percent_precise;
+                            }
+                        }
                     }
                 }
             }
