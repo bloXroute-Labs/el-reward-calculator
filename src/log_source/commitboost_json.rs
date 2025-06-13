@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::{ CommitBoostSlotInfos};
 use serde_json::{self, Deserializer, Value};
 use chrono::{DateTime, Utc};
-use std::collections::{HashMap, BTreeSet};
-use crate::log_source::types::{Bid,CommitBoostSlotInfo};
+use std::collections::HashMap;
+use crate::log_source::types::{Bid,CommitBoostRequest, CommitBoostSlotInfo};
 use ethers::types::U256;
 use ethers::utils::parse_ether;
 use crate::log_source::common::is_relay_proxy;
@@ -80,18 +80,35 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
             if log_entry.message == "received unblinded block" {
                 let block_hash = span.block_hash.clone().unwrap_or_default();
 
-                let matched_req_id = slot_info.requests.iter()
-                    .find(|(_, bidset)| bidset.bids.iter().any(|b| b.block_hash == block_hash))
-                    .map(|(req_id, _)| req_id.clone());
+                // Match all requests that contain the block_hash
+                let mut matched_req_ids: Vec<(&String, &CommitBoostRequest)> = slot_info
+                    .requests
+                    .iter()
+                    .filter(|(_, req)| req.bids.iter().any(|b| b.block_hash == block_hash))
+                    .collect();
 
-                if let Some(req_id) = matched_req_id {
-                    // Update even if already present if block_hash is different
+                if !matched_req_ids.is_empty() {
+                    // Sort by highest bid among relays matching the block_hash
+                    matched_req_ids.sort_by(|(_, a), (_, b)| {
+                        let a_max = a.bids.iter()
+                            .filter(|b| b.block_hash == block_hash)
+                            .map(|b| b.bid_value)
+                            .fold(0.0, f64::max);
+                        let b_max = b.bids.iter()
+                            .filter(|b| b.block_hash == block_hash)
+                            .map(|b| b.bid_value)
+                            .fold(0.0, f64::max);
+                        b_max.total_cmp(&a_max)
+                    });
+
+                    let (best_req_id, _) = matched_req_ids[0];
+
                     if slot_info.selected_req_id.is_none() || slot_info.block_hash != block_hash {
                         debug!(
-                            "[SUBMIT] Matching block_hash found. Setting selected_req_id={}, block_hash={}",
-                            req_id, block_hash
+                            "[SUBMIT] Selected best matching req_id={} with highest bid for block_hash={}",
+                            best_req_id, block_hash
                         );
-                        slot_info.selected_req_id = Some(req_id);
+                        slot_info.selected_req_id = Some(best_req_id.clone());
                         slot_info.block_hash = block_hash;
                         slot_info.block_number = format!("{}", span.block_number.unwrap_or_default());
                     }
@@ -106,7 +123,6 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
         _ => {}
     }
 }
-
 
 pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     for (_slot, slot_info_map) in slot_infos.iter_mut() {
@@ -128,11 +144,6 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
             bids.sort_by(|a, b| b.bid_value.total_cmp(&a.bid_value));
             let highest_bid = &bids[0];
-
-            let highest_bidders: BTreeSet<_> = bids.iter()
-                .filter(|b| b.bid_value == highest_bid.bid_value)
-                .map(|b| b.relay.clone())
-                .collect();
 
             let winning_bid = bids.iter().find(|b| &b.block_hash == &slot_info.block_hash);
 
