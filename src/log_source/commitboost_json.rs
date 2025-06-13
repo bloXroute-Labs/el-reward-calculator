@@ -78,25 +78,35 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
         }
         "/eth/v1/builder/blinded_blocks" => {
             if log_entry.message == "received unblinded block" {
-                if slot_info.selected_req_id.is_some() {
-                    return;
-                }
-
                 let block_hash = span.block_hash.clone().unwrap_or_default();
+
                 let matched_req_id = slot_info.requests.iter()
                     .find(|(_, bidset)| bidset.bids.iter().any(|b| b.block_hash == block_hash))
                     .map(|(req_id, _)| req_id.clone());
 
                 if let Some(req_id) = matched_req_id {
-                    slot_info.selected_req_id = Some(req_id.clone());
-                    slot_info.block_hash = block_hash;
-                    slot_info.block_number = format!("{}", span.block_number.unwrap_or_default());
+                    // Update even if already present if block_hash is different
+                    if slot_info.selected_req_id.is_none() || slot_info.block_hash != block_hash {
+                        debug!(
+                            "[SUBMIT] Matching block_hash found. Setting selected_req_id={}, block_hash={}",
+                            req_id, block_hash
+                        );
+                        slot_info.selected_req_id = Some(req_id);
+                        slot_info.block_hash = block_hash;
+                        slot_info.block_number = format!("{}", span.block_number.unwrap_or_default());
+                    }
+                } else {
+                    debug!(
+                        "[SUBMIT] No matching request for block_hash {} in slot_uid {}",
+                        block_hash, slot_uid
+                    );
                 }
             }
         }
         _ => {}
     }
 }
+
 
 pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     for (_slot, slot_info_map) in slot_infos.iter_mut() {
@@ -127,47 +137,31 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
             let winning_bid = bids.iter().find(|b| &b.block_hash == &slot_info.block_hash);
 
             if let Some(bid) = winning_bid {
-                let relay_proxy_won = highest_bidders.iter().any(|relay| is_relay_proxy(relay));
+                let winning_relay = bid.relay.clone();
+                let relay_proxy_won = is_relay_proxy(&winning_relay);
 
-                let relay_proxy_bidders: Vec<String> = if relay_proxy_won {
-                    highest_bidders.iter()
-                        .filter(|relay| !is_relay_proxy(relay))
-                        .map(|relay| relay.to_string())
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-
-                let highest_bidder_urls: Vec<String> = highest_bidders.iter()
-                    .map(|relay| relay.to_string())
-                    .collect();
-
-                slot_info.onchain_bid_delivered_relay = highest_bidder_urls.join(", ");
+                slot_info.onchain_bid_delivered_relay = winning_relay.clone();
                 slot_info.onchain_bid_value = bid.bid_value;
-                slot_info.equal_to_proxy_bidders = relay_proxy_bidders.join(", ");
-                slot_info.is_equal_to_proxy_bid = !relay_proxy_bidders.is_empty();
-                slot_info.is_proxy_win = relay_proxy_won && !slot_info.is_equal_to_proxy_bid;
+                slot_info.is_proxy_win = relay_proxy_won;
+                slot_info.is_equal_to_proxy_bid = false; // reset
+                slot_info.equal_to_proxy_bidders = String::new();
 
                 slot_info.is_winning_bid_highest =
                     bid.block_hash == highest_bid.block_hash
                     || bids.iter().any(|b| b.block_hash == bid.block_hash && b.bid_value == highest_bid.bid_value);
 
-                if highest_bidders.len() > 1 && !relay_proxy_won {
-                    continue;
-                }
-
-                if slot_info.is_proxy_win {
+                if relay_proxy_won {
                     let second_best_bid = bids.iter()
-                        .skip(1)
-                        .find(|bid| !is_relay_proxy(&bid.relay));
+                        .filter(|b| !is_relay_proxy(&b.relay))
+                        .find(|b| b.bid_value < bid.bid_value);
 
                     slot_info.second_highest_bid_value = second_best_bid.map_or(0.0, |b| b.bid_value);
-                    slot_info.second_higher_bid_delivered_relay = second_best_bid.map_or("".to_string(), |b| b.relay.clone());
+                    slot_info.second_higher_bid_delivered_relay = second_best_bid.map_or(String::new(), |b| b.relay.clone());
 
-                    if !slot_info.is_equal_to_proxy_bid && slot_info.second_highest_bid_value > 0.0 {
+                    if slot_info.second_highest_bid_value > 0.0 {
                         let el_reward_increase = slot_info.onchain_bid_value - slot_info.second_highest_bid_value;
                         let el_reward_increase_eth = (el_reward_increase * 1e18f64).round() / 1e18f64;
-                        let el_reward_increase_wei: U256 = parse_ether(&format!("{:.18}", el_reward_increase_eth)).unwrap();
+                        let el_reward_increase_wei: U256 = parse_ether(&format!("{:.18}", el_reward_increase_eth)).unwrap_or_default();
 
                         let precise_percent = (el_reward_increase / slot_info.onchain_bid_value) * 100.0;
                         let rounded_percent_precise = (precise_percent * 100.0).round() / 100.0;
@@ -183,7 +177,6 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         }
     }
 }
-
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
