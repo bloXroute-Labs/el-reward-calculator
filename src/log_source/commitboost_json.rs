@@ -7,7 +7,6 @@ use std::collections::{HashMap,BTreeSet};
 use crate::Bid;
 use ethers::types::U256;
 use ethers::utils::parse_ether;
-use ethers::utils::format_units;
 use crate::log_source::common::is_relay_proxy;
 use log::debug;
 
@@ -73,12 +72,8 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut SlotInfos) {
     }
 
     let slot = span.slot.unwrap_or_default().to_string();
-    let slot_uid = span.req_id.clone().unwrap_or_default();
-
-    debug!(
-        "[PROCESS] method={}, slot={}, slot_uid={}",
-        span.method, slot, slot_uid
-    );
+    let parent_hash = span.parent_hash.clone().unwrap_or_else(|| "unknown".to_string());
+    let slot_uid = format!("{}_{}", slot, parent_hash);
 
     let slot_info_map = slot_infos.entry(slot.clone()).or_insert_with(HashMap::new);
     let slot_info = slot_info_map.entry(slot_uid.clone()).or_insert_with(|| {
@@ -88,7 +83,7 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut SlotInfos) {
 
     match span.method.as_str() {
         "/eth/v1/builder/header/{slot}/{parent_hash}/{pubkey}" => {
-            if log_entry.fields.message.as_deref() == Some("received new header") {
+            if log_entry.message == "received new header" {
                 let mut bid: Bid = Default::default();
 
                 let date = DateTime::parse_from_rfc3339(&log_entry.timestamp)
@@ -109,8 +104,8 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut SlotInfos) {
                 bid.relay = log_entry.fields.relay_id.clone().unwrap_or_default();
 
                 debug!(
-                    "[GETHEADER] Adding bid: slot={}, block_hash={}, value_eth={}",
-                    bid.slot, bid.block_hash, bid.bid_value
+                    "[GETHEADER] Adding bid: slot_uid={}, block_hash={}, value_eth={}",
+                    slot_uid, bid.block_hash, bid.bid_value
                 );
 
                 slot_info.info.bids.push(bid);
@@ -118,15 +113,23 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut SlotInfos) {
         }
 
         "/eth/v1/builder/blinded_blocks" => {
-            if log_entry.fields.message.as_deref() == Some("received unblinded block") {
-                let block_hash = log_entry.fields.block_hash.clone().unwrap_or_default();
+            if log_entry.message == "received unblinded block" {
+                let block_hash = span.block_hash.clone().unwrap_or_default();
+
+                // Only set once
+                if slot_info.is_payload_received {
+                    return;
+                }
+
                 debug!(
-                    "[SUBMIT] Processing submit_blinded_block: slot={}, block_hash={}",
-                    slot, block_hash
+                    "[SUBMIT] Processing submit_blinded_block: slot_uid={}, block_hash={}",
+                    slot_uid, block_hash
                 );
 
                 slot_info.is_payload_received = true;
                 slot_info.info.block_hash = block_hash;
+                slot_info.block_number  = format!("{}", span.block_number.unwrap_or_default());
+
             }
         }
 
@@ -196,12 +199,14 @@ pub fn post_process_all_slots(slot_infos: &mut SlotInfos) {
 
                         if !slot_info.is_equal_to_proxy_bid && slot_info.second_highest_bid_value > 0.0 {
                             let el_reward_increase = slot_info.onchain_bid_value - slot_info.second_highest_bid_value;
-                            let el_reward_increase_wei: U256 = parse_ether(&el_reward_increase.to_string()).expect("Invalid Ether value");
-                            let el_reward_increase_eth = format_units(el_reward_increase_wei, "ether")
-                                .expect("Formatting failed")
-                                .parse::<f64>()
-                                .unwrap();
-                            let el_reward_increase_percentage = ((el_reward_increase / slot_info.onchain_bid_value) * 100.0).round() as u64;
+                            // Use el_reward_increase directly (not via U256 back-conversion)
+                            let el_reward_increase_eth = (el_reward_increase * 1_000_000_000_000_000_000f64).round() / 1_000_000_000_000_000_000f64;
+                            let el_reward_increase_wei: U256 = parse_ether(&format!("{:.18}", el_reward_increase_eth))
+                                .expect("Invalid Ether value");
+
+                            let precise_percent = (el_reward_increase / slot_info.onchain_bid_value) * 100.0;
+                            let rounded_percent_precise = (precise_percent * 100.0).round() / 100.0;
+                            let el_reward_increase_percentage = precise_percent.round() as u64;
 
                             debug!(
                                 "[POST] EL reward increase for slot_uid {}: {} ETH ({}%)",
@@ -211,6 +216,8 @@ pub fn post_process_all_slots(slot_infos: &mut SlotInfos) {
                             slot_info.el_reward_increase_wei = el_reward_increase_wei;
                             slot_info.el_reward_increase_eth = el_reward_increase_eth;
                             slot_info.el_reward_increase_percentage = el_reward_increase_percentage;
+                            slot_info.el_reward_increase_percent_precise = rounded_percent_precise;
+
                         }
                     }
                 }
@@ -228,21 +235,21 @@ pub struct CommitBoostLogEntry {
     pub span: Span,
 
     #[serde(flatten)]
-    pub fields: FlatFields,  // flattened fields like value_eth, block_hash, etc.
+    pub fields: FlatFields, // flattened fields like value_eth, block_hash, etc.
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct FlatFields {
-    pub message: Option<String>,
     pub latency: Option<String>,
     pub value_eth: Option<String>,
     pub block_hash: Option<String>,
     pub relay_id: Option<String>,
+    pub version: Option<String>,  // from getHeader log
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub struct Span {
     #[serde(rename = "req_id")]
     pub req_id: Option<String>,

@@ -193,7 +193,7 @@ pub fn calculate_uplift_second_pass_and_store_removed(
                             el_reward_increase_percent_precise.round() as u64;
 
                         slot_info.el_reward_increase_wei = el_reward_increase_wei;
-                        slot_info.el_reward_increase_eth = el_reward_increase_eth;
+                        slot_info.el_reward_increase_eth =  el_reward_increase_eth;
                         slot_info.el_reward_increase_percentage = el_reward_increase_percentage;
                         slot_info.el_reward_increase_percent_precise =
                             el_reward_increase_percent_precise;

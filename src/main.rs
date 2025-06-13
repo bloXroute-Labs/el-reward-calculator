@@ -10,6 +10,7 @@ use std::io::Write;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::Serializer;
 use serde_json::{self};
 use std::collections::HashMap;
 use std::fs;
@@ -17,7 +18,7 @@ use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::{self, ErrorKind};
-use std::io::Result;
+use  std::io::Result as IoResult;
 use std::str::FromStr;
 use std::{env, i64};
 use url::Url;
@@ -129,7 +130,9 @@ struct SlotInfo {
     info: RequestInfo,
     is_proxy_win: bool,
     is_winning_bid_highest: bool,
+    #[serde(serialize_with = "u256_to_string")]
     el_reward_increase_wei: U256,
+    #[serde(serialize_with = "float_to_fixed")]
     el_reward_increase_eth: f64,
     onchain_bid_value: f64,
     second_highest_bid_value: f64,
@@ -143,6 +146,12 @@ struct SlotInfo {
     fee_per_block: f64,
 }
 
+pub fn u256_to_string<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.to_string())
+}
 
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
 struct RequestInfo {
@@ -177,18 +186,30 @@ struct SlotInfoWithoutBids<'a> {
     block_hash: &'a str,
     is_proxy_win: bool,
     is_winning_bid_highest: bool,
+    #[serde(serialize_with = "float_to_fixed")]
     el_reward_increase_eth: f64,
     el_reward_increase_wei: U256,
+    #[serde(serialize_with = "float_to_fixed")]
     onchain_bid_value: f64,
     onchain_bid_delivered_relay: String,
+    #[serde(serialize_with = "float_to_fixed")]
     second_highest_bid_value: f64,
     second_higher_bid_delivered_relay: String,
     is_payload_received: bool,
     el_reward_increase_percentage: u64,
+    #[serde(serialize_with = "float_to_fixed")]
     el_reward_increase_percent_precise: f64,
     equal_to_proxy_bidders: String,
     is_equal_to_proxy_bid: bool,
+    #[serde(serialize_with = "float_to_fixed")]
     fee_per_block: f64,
+}
+
+pub fn float_to_fixed<S>(x: &f64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&format!("{:.18}", x))
 }
 
 
@@ -221,7 +242,7 @@ impl FromStr for LogSource {
 
 type SlotInfos = HashMap<String, HashMap<String, SlotInfo>>; // slot -> (slot_uid -> SlotInfo)
 
-fn main() -> Result<()> {
+fn main() -> IoResult<()>  {
     // Set default log level if RUST_LOG is not set.
     if env::var("RUST_LOG").is_err() {
         env::set_var("RUST_LOG", "info");
@@ -296,7 +317,7 @@ fn main() -> Result<()> {
         let mut wtr = WriterBuilder::new().has_headers(true).from_writer(file);
 
         // For each slot, select one record per rules.
-        for (slot, slot_info_with_uid) in slot_infos {
+        for (slot, slot_info_with_uid) in &slot_infos {
             debug!("Slot: {}, records: {:?}", slot, slot_info_with_uid);
 
             // Choose the record as follows:
@@ -348,6 +369,8 @@ fn main() -> Result<()> {
         let json_data = serde_json::to_string_pretty(&slot_infos)?;
         file.write_all(json_data.as_bytes())?;
     }
+    // write the final summary report
+    write_summary_report(&slot_infos, &folder_path, &date_str, &time_str)?;
     Ok(())
 }
 
@@ -414,4 +437,58 @@ fn parse_url(bid: &Bid) -> String {
             trimmed.to_string()
         },
     }
+}
+fn write_summary_report(slot_infos: &SlotInfos, folder_path: &str, date_str: &str, time_str: &str) -> std::io::Result<()> {
+    let mut total_slots = 0;
+    let mut slots_won_by_rproxy = 0;
+    let mut total_eth = 0.0f64;
+    let mut reward_improvement_eth = 0.0f64;
+
+    for slot_info_with_uid in slot_infos.values() {
+        for slot_info in slot_info_with_uid.values() {
+            total_slots += 1;
+
+            if slot_info.is_proxy_win {
+                slots_won_by_rproxy += 1;
+                total_eth += slot_info.onchain_bid_value;
+                reward_improvement_eth += slot_info.el_reward_increase_eth;
+            }
+        }
+    }
+
+    let improvement_percentage = if total_eth > 0.0 {
+        (reward_improvement_eth / total_eth) * 100.0
+    } else {
+        0.0
+    };
+
+    let summary_path = format!("{}/summary_{}_{}.txt", folder_path, date_str, time_str);
+    let mut summary_file = std::fs::File::create(&summary_path)?;
+
+    use std::io::Write;
+    writeln!(summary_file, "Total Slots           : {}", total_slots)?;
+    writeln!(summary_file, "Slots won by Rproxy   : {}", slots_won_by_rproxy)?;
+    writeln!(summary_file, "total                 : {:.18} ETH", total_eth)?;
+    writeln!(summary_file, "EL reward improvement : {:.18} ETH", reward_improvement_eth)?;
+    writeln!(
+        summary_file,
+        "Improvement percentage: ({:.18} / {:.18}) × 100 ≈ {:.18}%",
+        reward_improvement_eth,
+        total_eth,
+        improvement_percentage
+    )?;
+
+    // log to terminal
+    println!("Total Slots           : {}", total_slots);
+    println!("Slots won by Rproxy   : {}", slots_won_by_rproxy);
+    println!("total                 : {:.18} ETH", total_eth);
+    println!("EL reward improvement : {:.18} ETH", reward_improvement_eth);
+    println!(
+        "Improvement percentage: ({:.18} / {:.18}) × 100 ≈ {:.18}%",
+        reward_improvement_eth,
+        total_eth,
+        improvement_percentage
+    );
+
+    Ok(())
 }
