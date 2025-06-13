@@ -1,4 +1,5 @@
-use crate::{LogEntryVouch, SlotInfo, SlotInfos, };
+use crate::log_source::types::{LogEntryVouch,SlotInfo };
+use crate::SlotInfos;
 use serde_json::{self, Deserializer, Value};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -7,8 +8,7 @@ use log::debug;
 use ethers::types::U256;
 use ethers::utils::parse_ether;
 use ethers::utils::format_units;
-use crate::log_source::common::is_relay_proxy;
-use crate::parse_url;
+use crate::log_source::common::{is_relay_proxy, parse_url};
 use url::Url;
 use serde::Serialize;
 
@@ -193,7 +193,7 @@ pub fn calculate_uplift_second_pass_and_store_removed(
                             el_reward_increase_percent_precise.round() as u64;
 
                         slot_info.el_reward_increase_wei = el_reward_increase_wei;
-                        slot_info.el_reward_increase_eth = el_reward_increase_eth;
+                        slot_info.el_reward_increase_eth =  el_reward_increase_eth;
                         slot_info.el_reward_increase_percentage = el_reward_increase_percentage;
                         slot_info.el_reward_increase_percent_precise =
                             el_reward_increase_percent_precise;
