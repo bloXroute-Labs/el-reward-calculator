@@ -4,7 +4,7 @@ use crate::{ SlotInfo, SlotInfos };
 use serde_json::{self, Deserializer, Value};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap,BTreeSet};
-use crate::Bid;
+use crate::log_source::types::Bid;
 use ethers::types::U256;
 use ethers::utils::parse_ether;
 use crate::log_source::common::is_relay_proxy;

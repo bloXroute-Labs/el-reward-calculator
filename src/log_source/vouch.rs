@@ -1,4 +1,5 @@
-use crate::{LogEntryVouch, SlotInfo, SlotInfos, };
+use crate::log_source::types::{LogEntryVouch,SlotInfo };
+use crate::SlotInfos;
 use serde_json::{self, Deserializer, Value};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;

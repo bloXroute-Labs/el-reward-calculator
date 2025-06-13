@@ -5,12 +5,10 @@ use log_source::mevboost_text;
 use log_source::commitboost_json;
 use log_source::commitboost_text;
 use log_source::vouch;
+use crate::log_source::types::{SlotInfo,SlotInfoWithoutBids,Bid};
 use csv::WriterBuilder;
 use std::io::Write;
 use chrono::Utc;
-use serde::Deserialize;
-use serde::Serialize;
-use serde::Serializer;
 use serde_json::{self};
 use std::collections::HashMap;
 use std::fs;
@@ -20,9 +18,8 @@ use std::io::BufReader;
 use std::io::{self, ErrorKind};
 use  std::io::Result as IoResult;
 use std::str::FromStr;
-use std::{env, i64};
+use std::env;
 use url::Url;
-use ethers::types::U256;
 use log::info;
 use env_logger;
 use log::debug;
@@ -39,178 +36,7 @@ use log::debug;
 // method=getPayload parentHash=0x70a835e90e4cae6c513d422f075eb22be7be0765d63b968340ff11f8d89b012b slot=10052773 slotUID=2fd9298d-f6fe-4a29-b303-57ebda0bee6b ua=Lighthouse/v5.3.0-d6ba8c3
 // url="https://bloxroute.regulated.blxrbdn.com/eth/v1/builder/blinded_blocks" version=1.8
 
-#[derive(Debug,Default,Serialize, Deserialize)]
-#[allow(dead_code)]
-struct LogEntryVouch {
-    pub level: String,
-    pub service: String,
-    #[serde(rename = "impl")]
-    pub impl_field: String,
-    pub slot: i64,
-    pub provider: String,
-    pub value: String,
-    #[serde(rename = "value_delta")]
-    pub value_delta: String,
-    pub score: String,
-    #[serde(rename = "score_delta")]
-    pub score_delta: String,
-    pub selected: bool,
-    pub time: String,
-    pub message: String,
-}
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MEVBoostJSONLogEntry {
-    pub level: String,
-    pub method: String,
-    pub msg: String,
-    pub slot: String,
-    #[serde(rename = "slotUID", default)]
-    pub slot_uid: String,
-    pub time: String,
-    #[serde(default)]
-    pub block_hash: String,
-    #[serde(default)]
-    pub parent_hash: String,
-    #[serde(default)]
-    pub ua: String,
-    #[serde(default)]
-    pub url: String,
-    #[serde(default)]
-    pub version: String,
-    // Optional only needed for `getHeader` -> bid received
-    #[serde(default)]
-    pub block_number: Option<i64>,
-    #[serde(default)]
-    pub pubkey: Option<String>,
-    #[serde(default)]
-    pub tx_root: Option<String>,
-    #[serde(default)]
-    pub value: Option<String>,
-}
 
-#[derive(Debug,Default,Serialize, Deserialize)]
-#[allow(dead_code)]
-struct LogEntry {
-    client: String,
-    filename: String,
-    hostname: String,
-    log_format_version: String,
-    logstamp: u64,
-    message: Message,
-    network: String,
-    syslog_identifier: String,
-}
-
-#[derive(Debug,Default,Serialize, Deserialize)]
-#[allow(non_snake_case, dead_code)]
-struct Message {
-    blockHash: String,
-    level: String,
-    method: String,
-    msg: String,
-    parentHash: String,
-    slot: String,
-    slotUID: String,
-    time: String,
-    ua: String,
-    url: Option<String>,
-    version: String,
-    blockNumber: Option<u64>,
-    pubkey: Option<String>,
-    txRoot: Option<String>,
-    value: Option<String>,
-}
-
-#[derive(Debug,Default,Serialize, Deserialize)]
-struct SlotInfo {
-    slot_uid: String,
-    slot: String,
-    block_number: String,
-    info: RequestInfo,
-    is_proxy_win: bool,
-    is_winning_bid_highest: bool,
-    #[serde(serialize_with = "u256_to_string")]
-    el_reward_increase_wei: U256,
-    #[serde(serialize_with = "float_to_fixed")]
-    el_reward_increase_eth: f64,
-    onchain_bid_value: f64,
-    second_highest_bid_value: f64,
-    onchain_bid_delivered_relay: String,
-    second_higher_bid_delivered_relay: String,
-    is_payload_received: bool,
-    el_reward_increase_percentage: u64,
-    el_reward_increase_percent_precise: f64,
-    equal_to_proxy_bidders: String,
-    is_equal_to_proxy_bid: bool,
-    fee_per_block: f64,
-}
-
-pub fn u256_to_string<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str(&value.to_string())
-}
-
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
-struct RequestInfo {
-    header_start_ms_into_slot: i64,
-    bids: Vec<Bid>,
-    payload_start_ms_into_slot: i64,
-    block_hash: String,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd, Clone)]
-struct Bid {
-    timestamp: i64,
-    pubkey: String,
-    block_hash: String,
-    parent_hash: String,
-    block_number: String,
-    slot: String,
-    ua: String,
-    relay: String,
-    bid_value: f64,
-}
-
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct SlotInfoWithoutBids<'a> {
-    slot_uid: &'a str,
-    slot: &'a str,
-    block_number: &'a str,
-    header_start_ms_into_slot: i64,
-    payload_start_ms_into_slot: i64,
-    block_hash: &'a str,
-    is_proxy_win: bool,
-    is_winning_bid_highest: bool,
-    #[serde(serialize_with = "float_to_fixed")]
-    el_reward_increase_eth: f64,
-    el_reward_increase_wei: U256,
-    #[serde(serialize_with = "float_to_fixed")]
-    onchain_bid_value: f64,
-    onchain_bid_delivered_relay: String,
-    #[serde(serialize_with = "float_to_fixed")]
-    second_highest_bid_value: f64,
-    second_higher_bid_delivered_relay: String,
-    is_payload_received: bool,
-    el_reward_increase_percentage: u64,
-    #[serde(serialize_with = "float_to_fixed")]
-    el_reward_increase_percent_precise: f64,
-    equal_to_proxy_bidders: String,
-    is_equal_to_proxy_bid: bool,
-    #[serde(serialize_with = "float_to_fixed")]
-    fee_per_block: f64,
-}
-
-pub fn float_to_fixed<S>(x: &f64, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str(&format!("{:.18}", x))
-}
 
 
 #[derive(Debug)]
@@ -240,7 +66,7 @@ impl FromStr for LogSource {
 }
 
 
-type SlotInfos = HashMap<String, HashMap<String, SlotInfo>>; // slot -> (slot_uid -> SlotInfo)
+pub type SlotInfos = HashMap<String, HashMap<String, SlotInfo>>; // slot -> (slot_uid -> SlotInfo)
 
 fn main() -> IoResult<()>  {
     // Set default log level if RUST_LOG is not set.
@@ -375,56 +201,7 @@ fn main() -> IoResult<()>  {
 }
 
 
-impl SlotInfo {
-    fn new(slot_uid: String) -> Self {
-        Self {
-            slot_uid,
-            slot: String::new(),
-            block_number: String::new(),
-            info: Default::default(),
-            is_proxy_win: false,
-            el_reward_increase_wei: U256::default(),
-            el_reward_increase_eth: 0.0,
-            onchain_bid_value: 0.0,
-            second_highest_bid_value: 0.0,
-            onchain_bid_delivered_relay: String::new(),
-            second_higher_bid_delivered_relay: String::new(),
-            is_winning_bid_highest: false,
-            is_payload_received: false,
-            el_reward_increase_percentage: 0,
-            el_reward_increase_percent_precise: 0.0,
-            equal_to_proxy_bidders:String::new(),
-            is_equal_to_proxy_bid: false,
-            fee_per_block:0.0,
-        }
-    }
 
-    // initializes with both slot_uid and slot
-    #[allow(dead_code)]
-    fn new_with_slot_uid_and_slot(slot_uid: String, slot: String) -> Self {
-        Self {
-            slot_uid,
-            slot,
-            block_number: String::new(),
-            info: Default::default(),
-            is_proxy_win: false,
-            el_reward_increase_wei: U256::default(),
-            el_reward_increase_eth: 0.0,
-            onchain_bid_value: 0.0,
-            second_highest_bid_value: 0.0,
-            onchain_bid_delivered_relay: String::new(),
-            second_higher_bid_delivered_relay: String::new(),
-            is_winning_bid_highest: false,
-            is_payload_received: false,
-            el_reward_increase_percentage: 0,
-            el_reward_increase_percent_precise: 0.0,
-            equal_to_proxy_bidders:String::new(),
-            is_equal_to_proxy_bid: false,
-            fee_per_block:0.0,
-        }
-    }
-
-}
 
 
 fn parse_url(bid: &Bid) -> String {

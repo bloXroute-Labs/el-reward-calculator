@@ -4,3 +4,4 @@ pub  mod commitboost_json;
 pub  mod commitboost_text;
 pub  mod vouch;
 pub  mod common;
+pub  mod types;
