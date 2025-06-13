@@ -3,6 +3,63 @@ use serde::Serialize;
 use serde::Serializer;
 use ethers::types::U256;
 use std::i64;
+use std::collections::HashMap;
+
+// commit boost
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommitBoostSlotInfo {
+    pub slot: String,
+    pub slot_uid: String,
+    pub block_number: String,
+
+    /// All getHeader requests mapped by req_id
+    pub requests: HashMap<String, CommitBoostRequest>,
+
+    /// The selected request (identified via getPayload)
+    pub selected_req_id: Option<String>,
+    pub block_hash: String,
+    /// These fields will be computed post processing:
+    pub is_proxy_win: bool,
+    pub is_winning_bid_highest: bool,
+    #[serde(serialize_with = "u256_to_string")]
+    pub el_reward_increase_wei: U256,
+    #[serde(serialize_with = "float_to_fixed")]
+    pub el_reward_increase_eth: f64,
+    #[serde(serialize_with = "float_to_fixed")]
+    pub onchain_bid_value: f64,
+    #[serde(serialize_with = "float_to_fixed")]
+    pub second_highest_bid_value: f64,
+    pub onchain_bid_delivered_relay: String,
+    pub second_higher_bid_delivered_relay: String,
+    pub is_payload_received: bool,
+    pub el_reward_increase_percentage: u64,
+    #[serde(serialize_with = "float_to_fixed")]
+    pub el_reward_increase_percent_precise: f64,
+    pub equal_to_proxy_bidders: String,
+    pub is_equal_to_proxy_bid: bool,
+    #[serde(serialize_with = "float_to_fixed")]
+    pub fee_per_block: f64,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommitBoostRequest {
+    pub header_start_ms_into_slot: i64,
+    pub payload_start_ms_into_slot: i64,
+    pub block_hash: String,
+    pub pubkey: String,
+    pub parent_hash: String,
+    pub block_number: String,
+    pub bids: Vec<Bid>,
+}
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
+pub struct BidSet {
+   pub bids: Vec<Bid>,
+   pub pubkey: String,
+   pub parent_hash: String,
+   pub block_number: String,
+}
 
 #[derive(Debug,Default,Serialize, Deserialize)]
 #[allow(dead_code)]
@@ -226,4 +283,114 @@ impl SlotInfo {
         }
     }
 
+}
+
+impl CommitBoostSlotInfo {
+    pub fn new(slot_uid: String, slot: String) -> Self {
+        Self {
+            slot_uid,
+            slot,
+            block_number: String::new(),
+            block_hash: String::new(),
+            requests: std::collections::HashMap::new(),
+            selected_req_id: None,
+            is_proxy_win: false,
+            el_reward_increase_wei: U256::default(),
+            el_reward_increase_eth: 0.0,
+            onchain_bid_value: 0.0,
+            second_highest_bid_value: 0.0,
+            onchain_bid_delivered_relay: String::new(),
+            second_higher_bid_delivered_relay: String::new(),
+            is_winning_bid_highest: false,
+            is_payload_received: false,
+            el_reward_increase_percentage: 0,
+            el_reward_increase_percent_precise: 0.0,
+            equal_to_proxy_bidders: String::new(),
+            is_equal_to_proxy_bid: false,
+            fee_per_block: 0.0,
+        }
+    }
+}
+pub trait SlotTrait {
+    fn get_uid(&self) -> &str;
+    fn get_block_number(&self) -> &str;
+    fn get_slot(&self) -> &str;
+    fn get_block_hash(&self) -> &str;
+    fn get_header_start(&self) -> i64;
+    fn get_payload_start(&self) -> i64;
+    fn is_proxy_win(&self) -> bool;
+    fn is_winning_bid_highest(&self) -> bool;
+    fn get_el_reward_eth(&self) -> f64;
+    fn get_el_reward_wei(&self) -> U256;
+    fn get_onchain_bid_value(&self) -> f64;
+    fn get_onchain_bid_delivered_relay(&self) -> &str;
+    fn get_second_highest_bid_value(&self) -> f64;
+    fn get_second_higher_bid_delivered_relay(&self) -> &str;
+    fn is_payload_received(&self) -> bool;
+    fn get_el_reward_percentage(&self) -> u64;
+    fn get_el_reward_precise(&self) -> f64;
+    fn get_equal_to_proxy_bidders(&self) -> &str;
+    fn is_equal_to_proxy_bid(&self) -> bool;
+    fn get_fee_per_block(&self) -> f64;
+}
+
+impl SlotTrait for SlotInfo {
+    fn get_uid(&self) -> &str { &self.slot_uid }
+    fn get_block_number(&self) -> &str { &self.block_number }
+    fn get_slot(&self) -> &str { &self.slot }
+    fn get_block_hash(&self) -> &str { &self.info.block_hash }
+    fn get_header_start(&self) -> i64 { self.info.header_start_ms_into_slot }
+    fn get_payload_start(&self) -> i64 { self.info.payload_start_ms_into_slot }
+    fn is_proxy_win(&self) -> bool { self.is_proxy_win }
+    fn is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
+    fn get_el_reward_eth(&self) -> f64 { self.el_reward_increase_eth }
+    fn get_el_reward_wei(&self) -> U256 { self.el_reward_increase_wei.clone() }
+    fn get_onchain_bid_value(&self) -> f64 { self.onchain_bid_value }
+    fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
+    fn get_second_highest_bid_value(&self) -> f64 { self.second_highest_bid_value }
+    fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
+    fn is_payload_received(&self) -> bool { self.is_payload_received }
+    fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
+    fn get_el_reward_precise(&self) -> f64 { self.el_reward_increase_percent_precise }
+    fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
+    fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
+    fn get_fee_per_block(&self) -> f64 { self.fee_per_block }
+}
+
+impl SlotTrait for CommitBoostSlotInfo {
+    fn get_uid(&self) -> &str { &self.slot_uid }
+    fn get_block_number(&self) -> &str { &self.block_number }
+    fn get_slot(&self) -> &str { &self.slot }
+    fn get_block_hash(&self) -> &str { &self.block_hash }
+
+    fn get_header_start(&self) -> i64 {
+        self.selected_req_id
+            .as_ref()
+            .and_then(|rid| self.requests.get(rid))
+            .map(|req| req.header_start_ms_into_slot)
+            .unwrap_or_default()
+    }
+
+    fn get_payload_start(&self) -> i64 {
+        self.selected_req_id
+            .as_ref()
+            .and_then(|rid| self.requests.get(rid))
+            .map(|req| req.payload_start_ms_into_slot)
+            .unwrap_or_default()
+    }
+
+    fn is_proxy_win(&self) -> bool { self.is_proxy_win }
+    fn is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
+    fn get_el_reward_eth(&self) -> f64 { self.el_reward_increase_eth }
+    fn get_el_reward_wei(&self) -> U256 { self.el_reward_increase_wei.clone() }
+    fn get_onchain_bid_value(&self) -> f64 { self.onchain_bid_value }
+    fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
+    fn get_second_highest_bid_value(&self) -> f64 { self.second_highest_bid_value }
+    fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
+    fn is_payload_received(&self) -> bool { self.selected_req_id.is_some() }
+    fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
+    fn get_el_reward_precise(&self) -> f64 { self.el_reward_increase_percent_precise }
+    fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
+    fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
+    fn get_fee_per_block(&self) -> f64 { self.fee_per_block }
 }

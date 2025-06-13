@@ -9,7 +9,7 @@ use ethers::types::U256;
 use ethers::utils::parse_ether;
 use ethers::utils::format_units;
 use crate::log_source::common::is_relay_proxy;
-use crate::parse_url;
+use crate::log_source::common::parse_url;
 use log::debug;
 
 lazy_static! {
