@@ -4,7 +4,7 @@ use crate::{ CommitBoostSlotInfos};
 use serde_json::{self, Deserializer, Value};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use crate::log_source::types::{Bid,CommitBoostRequest, CommitBoostSlotInfo};
+use crate::log_source::types::{Bid,CommitBoostRequest, CommitBoostSlotInfo, SlotTrait};
 use ethers::types::U256;
 use ethers::utils::parse_ether;
 use crate::log_source::common::is_relay_proxy;
@@ -101,7 +101,7 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
 
                     let (best_req_id, _) = matched_req_ids[0];
 
-                    if slot_info.selected_req_id.is_none() || slot_info.block_hash != block_hash {
+                    if slot_info.selected_req_id.is_none() || slot_info.get_block_hash() != block_hash {
                         debug!(
                             "[SUBMIT] Selected best matching req_id={} with highest bid for block_hash={}",
                             best_req_id, block_hash
