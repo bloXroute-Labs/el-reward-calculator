@@ -6,7 +6,7 @@ use std::i64;
 use std::collections::HashMap;
 
 // commit boost
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CommitBoostSlotInfo {
     pub slot: String,
@@ -42,7 +42,7 @@ pub struct CommitBoostSlotInfo {
     pub fee_per_block: f64,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CommitBoostRequest {
     pub header_start_ms_into_slot: i64,
@@ -53,7 +53,7 @@ pub struct CommitBoostRequest {
     pub block_number: String,
     pub bids: Vec<Bid>,
 }
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct BidSet {
    pub bids: Vec<Bid>,
    pub pubkey: String,
@@ -61,7 +61,7 @@ pub struct BidSet {
    pub block_number: String,
 }
 
-#[derive(Debug,Default,Serialize, Deserialize)]
+#[derive(Clone, Debug,Default,Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct LogEntryVouch {
     pub level: String,
@@ -111,7 +111,7 @@ pub struct MEVBoostJSONLogEntry {
     pub value: Option<String>,
 }
 
-#[derive(Debug,Default,Serialize, Deserialize)]
+#[derive(Clone, Debug,Default,Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct LogEntry {
     pub client: String,
@@ -124,7 +124,7 @@ pub struct LogEntry {
     pub syslog_identifier: String,
 }
 
-#[derive(Debug,Default,Serialize, Deserialize)]
+#[derive(Clone, Debug,Default,Serialize, Deserialize)]
 #[allow(non_snake_case, dead_code)]
 pub struct Message {
     pub blockHash: String,
@@ -144,7 +144,7 @@ pub struct Message {
     pub value: Option<String>,
 }
 
-#[derive(Debug,Default,Serialize, Deserialize)]
+#[derive(Clone, Debug,Default,Serialize, Deserialize)]
 pub struct SlotInfo {
     pub slot_uid: String,
     pub slot: String,
@@ -175,7 +175,7 @@ where
     serializer.serialize_str(&value.to_string())
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct RequestInfo {
     pub header_start_ms_into_slot: i64,
     pub bids: Vec<Bid>,
@@ -197,7 +197,7 @@ pub struct Bid {
 }
 
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct SlotInfoWithoutBids<'a> {
     pub slot_uid: &'a str,

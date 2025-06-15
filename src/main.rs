@@ -5,6 +5,7 @@ use log_source::mevboost_text;
 use log_source::commitboost_text;
 use log_source::commitboost_json;
 use log_source::vouch;
+use log_source::stats_writer;
 use crate::log_source::types::{CommitBoostSlotInfo,SlotInfo,Bid};
 use chrono::Utc;
 use std::collections::HashMap;
@@ -63,6 +64,14 @@ impl FromStr for LogSource {
 pub type SlotInfos = HashMap<String, HashMap<String, SlotInfo>>; // slot -> (slot_uid -> SlotInfo)
 pub type CommitBoostSlotInfos = HashMap<String, HashMap<String, CommitBoostSlotInfo>>;
 
+pub type FinalSlotInfos = HashMap<String, SlotInfo>;
+pub type FinalSlotInfosCommitBoost = HashMap<String, CommitBoostSlotInfo>;
+// // for SlotInfo
+// let selected_slot_infos = select_final_slot_infos_generic::<SlotInfo>(&mevboost_slot_infos);
+
+// // for CommitBoostSlotInfo
+// let selected_commit_infos = select_final_slot_infos_generic::<CommitBoostSlotInfo>(&commitboost_slot_infos);
+
 fn main() -> IoResult<()>  {
     if env::var("RUST_LOG").is_err() {
            env::set_var("RUST_LOG", "info");
@@ -98,13 +107,19 @@ fn main() -> IoResult<()>  {
            LogSource::CommitboostJson => {
                let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
                commitboost_json::parse_file_content(reader, &mut slot_infos);
+               // Always select final infos once
+               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                match output_format {
-                   "csv" => crate::log_source::common::write_csv_commitboost(&slot_infos, &folder_path, &date_str, &time_str)?,
-                   _ => crate::log_source::common::write_json_commitboost(&slot_infos, &folder_path, &date_str, &time_str)?,
+                   "csv" => {
+                       stats_writer::write_csv_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
+                   }
+                   _ => {
+                       stats_writer::write_json_generic(&slot_infos, &folder_path, &date_str, &time_str)?;
+                   }
                }
+               stats_writer::write_summary_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
 
-               crate::log_source::common::write_summary_report_commitboost(&slot_infos, &folder_path, &date_str, &time_str)?;
            }
            LogSource::CommitboostText => {
                let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
@@ -114,55 +129,82 @@ fn main() -> IoResult<()>  {
                        Err(e) => eprintln!("failed to read lines: {}", e),
                    }
                }
+               // Always select final infos once
+               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                match output_format {
-                   "csv" => crate::log_source::common::write_csv_commitboost(&slot_infos, &folder_path, &date_str, &time_str)?,
-                   _ => crate::log_source::common::write_json_commitboost(&slot_infos, &folder_path, &date_str, &time_str)?,
+                   "csv" => {
+                       stats_writer::write_csv_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
+                   }
+                   _ => {
+                       stats_writer::write_json_generic(&slot_infos, &folder_path, &date_str, &time_str)?;
+                   }
                }
+               stats_writer::write_summary_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
 
-               crate::log_source::common::write_summary_report_commitboost(&slot_infos, &folder_path, &date_str, &time_str)?;
            }
 
            LogSource::MevboostJson => {
                let mut slot_infos: SlotInfos = HashMap::new();
                mevboost_json::parse_file_content(reader, &mut slot_infos);
+               // Always select final infos once
+               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                match output_format {
-                   "csv" => crate::log_source::common::write_csv(&slot_infos, &folder_path, &date_str, &time_str)?,
-                   _ => crate::log_source::common::write_json(&slot_infos, &folder_path, &date_str, &time_str)?,
+                   "csv" => {
+                       stats_writer::write_csv_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
+                   }
+                   _ => {
+                       stats_writer::write_json_generic(&slot_infos, &folder_path, &date_str, &time_str)?;
+                   }
                }
-
-               crate::log_source::common::write_summary_report(&slot_infos, &folder_path, &date_str, &time_str)?;
+               stats_writer::write_summary_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
            }
 
            LogSource::Vouch => {
                let mut slot_infos: SlotInfos = HashMap::new();
                vouch::parse_file_content(reader, &mut slot_infos);
+               // Always select final infos once
+               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                match output_format {
-                   "csv" => crate::log_source::common::write_csv(&slot_infos, &folder_path, &date_str, &time_str)?,
-                   _ => crate::log_source::common::write_json(&slot_infos, &folder_path, &date_str, &time_str)?,
+                   "csv" => {
+                       stats_writer::write_csv_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
+                   }
+                   _ => {
+                       stats_writer::write_json_generic(&slot_infos, &folder_path, &date_str, &time_str)?;
+                   }
                }
-
-               crate::log_source::common::write_summary_report(&slot_infos, &folder_path, &date_str, &time_str)?;
+               stats_writer::write_summary_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
            }
 
            LogSource::MevboostText => {
                let mut slot_infos: SlotInfos = HashMap::new();
+
                for line in reader.lines() {
                    match line {
-                       Ok(line) => mevboost_text::process_lines(line, &mut slot_infos),
+                       Ok(line) => mevboost_text::process_lines_first_pass(line, &mut slot_infos),
                        Err(e) => eprintln!("failed to read lines: {}", e),
                    }
                }
 
-               match output_format {
-                   "csv" => crate::log_source::common::write_csv(&slot_infos, &folder_path, &date_str, &time_str)?,
-                   _ => crate::log_source::common::write_json(&slot_infos, &folder_path, &date_str, &time_str)?,
-               }
+               mevboost_text::finalize_slot_infos(&mut slot_infos);
 
-               crate::log_source::common::write_summary_report(&slot_infos, &folder_path, &date_str, &time_str)?;
+               // Always select final infos once
+               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+
+               match output_format {
+                   "csv" => {
+                       stats_writer::write_csv_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
+                   }
+                   _ => {
+                       stats_writer::write_json_generic(&slot_infos, &folder_path, &date_str, &time_str)?;
+                   }
+               }
+               stats_writer::write_summary_generic(&selected_infos, &folder_path, &date_str, &time_str)?;
            }
+
+
 
        }
 
