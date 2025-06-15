@@ -225,6 +225,7 @@ pub fn write_summary_generic<T: RewardStats>(
     let total_slots = slot_infos.len();
     let mut slots_won_by_rproxy = 0;
     let mut total_eth = 0.0f64;
+    let mut total_eth_overall = 0.0f64;
     let mut reward_improvement_eth = 0.0f64;
 
     // Sort by UID for deterministic accumulation
@@ -232,6 +233,7 @@ pub fn write_summary_generic<T: RewardStats>(
     sorted_infos.sort_by(|a, b| a.get_uid().cmp(&b.get_uid()));
 
     for info in sorted_infos {
+        total_eth_overall += info.get_onchain_bid_value();
         if info.get_is_proxy_win() {
             slots_won_by_rproxy += 1;
             total_eth += info.get_onchain_bid_value();
@@ -251,8 +253,9 @@ pub fn write_summary_generic<T: RewardStats>(
     let mut file = File::create(&summary_path)?;
 
     writeln!(file, "Total Slots           : {}", total_slots)?;
-    writeln!(file, "Slots won by Rproxy   : {}", slots_won_by_rproxy)?;
-    writeln!(file, "total(Rproxy slots)   : {:.18} ETH", total_eth)?;
+    writeln!(file, "total eth overall     : {:.18} ETH", total_eth_overall)?;
+    writeln!(file, "Slots won by Rproxy    : {}", slots_won_by_rproxy)?;
+    writeln!(file, "total eth(Rproxy slots): {:.18} ETH", total_eth)?;
     writeln!(file, "EL reward improvement : {:.18} ETH", reward_improvement_eth)?;
     writeln!(
         file,
@@ -264,12 +267,12 @@ pub fn write_summary_generic<T: RewardStats>(
     writeln!(file, "50% Owed to BLXR      : {:.18} ETH", owed_to_blxr)?;
 
     // Print to console as well
-    println!("Total Slots           : {}", total_slots);
-    println!("Slots won by Rproxy   : {}", slots_won_by_rproxy);
-    println!("total(Rproxy slots)   : {:.18} ETH", total_eth);
-    println!("EL reward improvement : {:.18} ETH", reward_improvement_eth);
-    println!(
-        "Improvement percentage: ({:.18} / {:.18}) × 100 ≈ {:.18}%",
+    println!("Total Slots              : {}", total_slots);
+    println!("total eth overall        : {:.18} ETH", total_eth_overall);
+    println!("Slots won by Rproxy      : {}", slots_won_by_rproxy);
+    println!("total eth (Rproxy slots) : {:.18} ETH", total_eth);
+    println!("EL reward improvement    : {:.18} ETH", reward_improvement_eth);
+    println!("Improvement percentage   : ({:.18} / {:.18}) × 100 ≈ {:.18}%",
         reward_improvement_eth,
         total_eth,
         improvement_percentage
