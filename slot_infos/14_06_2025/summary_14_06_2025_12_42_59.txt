@@ -1,5 +1,0 @@
-Total Slots           : 3098
-Slots won by Rproxy   : 939
-total                 : 57.374148249286257339 ETH
-EL reward improvement : 1.232894123156876631 ETH
-Improvement percentage: (1.232894123156876631 / 57.374148249286257339) × 100 ≈ 2.148866973676099690%
