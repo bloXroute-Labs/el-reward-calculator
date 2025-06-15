@@ -1,6 +1,6 @@
 
 use csv::WriterBuilder;
-use crate::{  SlotInfo};
+use crate::{ SlotInfo};
 use crate::log_source::types::{ CommitBoostSlotInfo, SlotInfoWithoutBids};
 use serde_json::{self};
 use log::debug;
