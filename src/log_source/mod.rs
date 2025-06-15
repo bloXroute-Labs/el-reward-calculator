@@ -5,3 +5,4 @@ pub  mod commitboost_text;
 pub  mod vouch;
 pub  mod common;
 pub  mod types;
+pub  mod stats_writer;

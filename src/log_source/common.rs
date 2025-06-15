@@ -1,24 +1,22 @@
 
 use csv::WriterBuilder;
 use std::io::Write;
-use crate::{ CommitBoostSlotInfos, SlotInfos, };
-use crate::log_source::types::{SlotInfo,Bid, SlotInfoWithoutBids, SlotTrait};
+use crate::{ CommitBoostSlotInfos, SlotInfos,FinalSlotInfos,FinalSlotInfosCommitBoost };
+use crate::log_source::types::{Bid,  SlotInfoWithoutBids, SlotTrait};
 use serde_json::{self};
 use std::fs::File;
 use log::debug;
 use  std::io::Result as IoResult;
 use url::Url;
+use std::collections::HashMap;
+
 
 pub fn is_relay_proxy(relay: &str) -> bool {
     relay.contains("relay-proxy") || relay.contains("Relay Proxy") || relay.contains("rproxy") || relay.contains("rpoxy") // handle typo
 }
 
-
-pub fn write_csv(slot_infos: &SlotInfos, folder_path: &str, date_str: &str, time_str: &str) -> IoResult<()> {
-    let file_path = format!("{}/slot_infos_{}_{}.csv", folder_path, date_str, time_str);
-    let file = File::create(&file_path)?;
-    let mut wtr = WriterBuilder::new().has_headers(true).from_writer(file);
-
+pub fn select_final_slot_infos(slot_infos: &SlotInfos)-> FinalSlotInfos{
+    let  mut final_selected: FinalSlotInfos = HashMap::new();
     // For each slot, select one record per rules.
     for (slot, slot_info_with_uid) in slot_infos {
         debug!("Slot: {}, records: {:?}", slot, slot_info_with_uid);
@@ -26,20 +24,79 @@ pub fn write_csv(slot_infos: &SlotInfos, folder_path: &str, date_str: &str, time
         // Choose the record as follows:
         // If any record has is_proxy_win true, select the one with highest el_reward_increase_eth.
         // Otherwise, choose the first record.
-        let chosen = if let Some(proxy_wins) = {
-            let wins: Vec<&SlotInfo> = slot_info_with_uid.values().filter(|si| si.is_proxy_win).collect();
-            if !wins.is_empty() { Some(wins) } else { None }
-        } {
-            proxy_wins.into_iter().max_by(|a, b| {
-                a.el_reward_increase_eth
-                    .partial_cmp(&b.el_reward_increase_eth)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+        let proxy_wins: Vec<_> = slot_info_with_uid
+            .values()
+            .filter(|si| {
+                let valid = si.is_proxy_win && si.el_reward_increase_eth.is_finite();
+                if si.is_proxy_win {
+                    debug!(
+                        "[SELECT] slot_uid={} is_proxy_win=true el_reward_increase_eth={} valid={}",
+                        si.slot_uid, si.el_reward_increase_eth, valid
+                    );
+                }
+                valid
             })
-        } else {
-            slot_info_with_uid.values().next()
-        };
+            .collect();
 
+        let chosen = if !proxy_wins.is_empty() {
+            let selected = proxy_wins
+                .into_iter()
+                .max_by(|a, b| {
+                    let cmp = a.el_reward_increase_eth
+                        .partial_cmp(&b.el_reward_increase_eth)
+                        .unwrap_or(std::cmp::Ordering::Equal);
+                    if cmp == std::cmp::Ordering::Equal {
+                        // Deterministic tie-breaker: use slot_uid
+                        debug!(
+                            "[TIE] Equal el_reward_increase_eth: {} == {}, tie-breaking with slot_uid",
+                            a.el_reward_increase_eth, b.el_reward_increase_eth
+                        );
+                        a.slot_uid.cmp(&b.slot_uid)
+                    } else {
+                        cmp
+                    }
+                })
+                .unwrap(); // safe unwrap, list is not empty
+
+            debug!(
+                "[CHOSEN] Selected proxy win slot_uid={}, el_reward_increase_eth={}, onchain_bid_value={}, is_equal_to_proxy_bid={}, second_highest={}",
+                selected.slot_uid,
+                selected.el_reward_increase_eth,
+                selected.onchain_bid_value,
+                selected.is_equal_to_proxy_bid,
+                selected.second_highest_bid_value
+            );
+
+            Some(selected)
+        } else {
+            let fallback = slot_info_with_uid.values().next();
+            if let Some(f) = fallback {
+                debug!(
+                    "[CHOSEN] No proxy win, defaulting to first slot_uid={} with block_hash={}",
+                    f.slot_uid, f.info.block_hash
+                );
+            } else {
+                debug!("[CHOSEN] No slot_info entries found at all.");
+            }
+            fallback
+
+        };
         if let Some(slot_info) = chosen {
+            final_selected.insert(slot.to_string(), slot_info.clone());
+        }
+        // track selected
+    }
+    final_selected
+}
+
+pub fn write_csv(slot_infos: &FinalSlotInfos, folder_path: &str, date_str: &str, time_str: &str) -> IoResult<()> {
+    let file_path = format!("{}/slot_infos_{}_{}.csv", folder_path, date_str, time_str);
+    let file = File::create(&file_path)?;
+    let mut wtr = WriterBuilder::new().has_headers(true).from_writer(file);
+
+
+
+    for (_slot, slot_info) in slot_infos {
             let record = SlotInfoWithoutBids {
                 slot_uid: &slot_info.slot_uid,
                 slot: &slot_info.slot,
@@ -63,7 +120,6 @@ pub fn write_csv(slot_infos: &SlotInfos, folder_path: &str, date_str: &str, time
                 fee_per_block: slot_info.fee_per_block,
             };
             wtr.serialize(record)?;
-        }
     }
     wtr.flush()?;
     Ok(())
@@ -78,15 +134,23 @@ pub fn write_json(slot_infos: &SlotInfos, folder_path: &str, date_str: &str, tim
 }
 
 
-pub fn write_csv_commitboost(slot_infos: &CommitBoostSlotInfos, folder_path: &str, date_str: &str, time_str: &str) -> IoResult<()> {
+pub fn write_csv_commitboost(slot_infos: &CommitBoostSlotInfos, folder_path: &str, date_str: &str, time_str: &str) -> IoResult<FinalSlotInfosCommitBoost> {
     let file_path = format!("{}/slot_infos_{}_{}.csv", folder_path, date_str, time_str);
     let file = File::create(&file_path)?;
     let mut wtr = WriterBuilder::new().has_headers(true).from_writer(file);
 
+    let mut final_selected: FinalSlotInfosCommitBoost = HashMap::new();
     for (_slot, slot_info_with_uid) in slot_infos {
-        let chosen = slot_info_with_uid.values().filter(|si| si.is_proxy_win).max_by(|a, b| a.el_reward_increase_eth.partial_cmp(&b.el_reward_increase_eth).unwrap_or(std::cmp::Ordering::Equal))
-            .or_else(|| slot_info_with_uid.values().next());
-
+        let proxy_wins: Vec<_> = slot_info_with_uid.values().filter(|si| si.is_proxy_win).collect();
+        let chosen = if !proxy_wins.is_empty() {
+            proxy_wins.into_iter().max_by(|a, b| {
+                a.el_reward_increase_eth
+                    .partial_cmp(&b.el_reward_increase_eth)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+        } else {
+            slot_info_with_uid.values().next()
+        };
         if let Some(slot_info) = chosen {
             let record = SlotInfoWithoutBids {
                 slot_uid: slot_info.get_uid(),
@@ -111,10 +175,12 @@ pub fn write_csv_commitboost(slot_infos: &CommitBoostSlotInfos, folder_path: &st
                 fee_per_block: slot_info.get_fee_per_block(),
             };
             wtr.serialize(record)?;
+            // track selected
+            final_selected.insert(slot_info.get_slot().to_string(), slot_info.clone());
         }
     }
     wtr.flush()?;
-    Ok(())
+    Ok(final_selected)
 }
 
 
@@ -127,19 +193,18 @@ pub fn write_json_commitboost(slot_infos: &CommitBoostSlotInfos, folder_path: &s
 }
 
 pub fn write_summary_report_commitboost(slot_infos: &CommitBoostSlotInfos, folder_path: &str, date_str: &str, time_str: &str) -> std::io::Result<()> {
-    let mut total_slots = 0;
+    let total_slots = slot_infos.len();
     let mut slots_won_by_rproxy = 0;
     let mut total_eth = 0.0f64;
     let mut reward_improvement_eth = 0.0f64;
 
     for slot_info_with_uid in slot_infos.values() {
         for slot_info in slot_info_with_uid.values() {
-            total_slots += 1;
-
             if slot_info.is_proxy_win {
                 slots_won_by_rproxy += 1;
                 total_eth += slot_info.onchain_bid_value;
                 reward_improvement_eth += slot_info.el_reward_increase_eth;
+                break;
             }
         }
     }
@@ -191,23 +256,20 @@ pub fn parse_url(bid: &Bid) -> String {
         },
     }
 }
-pub fn write_summary_report(slot_infos: &SlotInfos, folder_path: &str, date_str: &str, time_str: &str) -> std::io::Result<()> {
-    let mut total_slots = 0;
+pub fn write_summary_report(slot_infos: &FinalSlotInfos, folder_path: &str, date_str: &str, time_str: &str) -> std::io::Result<()> {
+    let total_slots = slot_infos.len();
     let mut slots_won_by_rproxy = 0;
     let mut total_eth = 0.0f64;
     let mut reward_improvement_eth = 0.0f64;
 
-    for slot_info_with_uid in slot_infos.values() {
-        for slot_info in slot_info_with_uid.values() {
-            total_slots += 1;
-
+        for slot_info in slot_infos.values() {
             if slot_info.is_proxy_win {
                 slots_won_by_rproxy += 1;
                 total_eth += slot_info.onchain_bid_value;
                 reward_improvement_eth += slot_info.el_reward_increase_eth;
+                break;
             }
         }
-    }
 
     let improvement_percentage = if total_eth > 0.0 {
         (reward_improvement_eth / total_eth) * 100.0

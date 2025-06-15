@@ -1,0 +1,478 @@
+{
+  "11645073": {
+    "28f570ca-5d89-4f6e-b6de-db4ae48f4b3b": {
+      "slot_uid": "28f570ca-5d89-4f6e-b6de-db4ae48f4b3b",
+      "slot": "11645073",
+      "block_number": "22427177",
+      "info": {
+        "header_start_ms_into_slot": 360,
+        "bids": [
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x111e5d5f8b5b040c54e487c6cbd86220beb737a4cc02bc4dfe79a95cd25b9ed4",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://relay.ultrasound.money/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.013857583318536154
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x111e5d5f8b5b040c54e487c6cbd86220beb737a4cc02bc4dfe79a95cd25b9ed4",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://relay.ultrasound.money/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.013857583318536154
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x929293d110f7c2ef7639703588c0924517ffc8ae14c01363f5dad1ceb81c9bf3",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"http://relay-proxy.blxrbdn.com:18550/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c?id=Everstake&auth=YmU1YjY0YzItZWUzMy00N2M3LTg2MTAtMjYyYTViMzhhNzNiOmFjYjdkNDMxOGJhMWRmNTYzZjg4YjY0ZGIxZWIyMmZh\\",
+            "bid_value": 0.013684879705227505
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x929293d110f7c2ef7639703588c0924517ffc8ae14c01363f5dad1ceb81c9bf3",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"http://relay-proxy.blxrbdn.com:18550/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c?id=Everstake&auth=YmU1YjY0YzItZWUzMy00N2M3LTg2MTAtMjYyYTViMzhhNzNiOmFjYjdkNDMxOGJhMWRmNTYzZjg4YjY0ZGIxZWIyMmZh\\",
+            "bid_value": 0.013684879705227505
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x59c41fba113e74c228127c55711c8930454934f3c1a271f305a19fac66d3c2d9",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"http://relay-proxy.blxrbdn.com:18551/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c?id=Everstake&auth=YmU1YjY0YzItZWUzMy00N2M3LTg2MTAtMjYyYTViMzhhNzNiOmFjYjdkNDMxOGJhMWRmNTYzZjg4YjY0ZGIxZWIyMmZh\\",
+            "bid_value": 0.013682534905227505
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x59c41fba113e74c228127c55711c8930454934f3c1a271f305a19fac66d3c2d9",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"http://relay-proxy.blxrbdn.com:18551/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c?id=Everstake&auth=YmU1YjY0YzItZWUzMy00N2M3LTg2MTAtMjYyYTViMzhhNzNiOmFjYjdkNDMxOGJhMWRmNTYzZjg4YjY0ZGIxZWIyMmZh\\",
+            "bid_value": 0.013682534905227505
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x8fc693f0ab9c34203435cb253f8f880752749bf1d62e5dd636d5960048791447",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://aestus.live/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.013044216245895881
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x8fc693f0ab9c34203435cb253f8f880752749bf1d62e5dd636d5960048791447",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://aestus.live/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.013044216245895881
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x4940841ab203306f58812d80c9bbb0cfd5212de40d96a4ed0536c9a9478fd0dc",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://bloxroute.regulated.blxrbdn.com/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.01154539661146979
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x4940841ab203306f58812d80c9bbb0cfd5212de40d96a4ed0536c9a9478fd0dc",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://bloxroute.regulated.blxrbdn.com/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.01154539661146979
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x4940841ab203306f58812d80c9bbb0cfd5212de40d96a4ed0536c9a9478fd0dc",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://bloxroute.max-profit.blxrbdn.com/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.01154539661146979
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x4940841ab203306f58812d80c9bbb0cfd5212de40d96a4ed0536c9a9478fd0dc",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://bloxroute.max-profit.blxrbdn.com/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.01154539661146979
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x321ae6a5f388cf2c403542700d36ef18a6a7bc68510dc587a4e167200dbfc731",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://boost-relay.flashbots.net/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.01095542317708909
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x321ae6a5f388cf2c403542700d36ef18a6a7bc68510dc587a4e167200dbfc731",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://boost-relay.flashbots.net/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.01095542317708909
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xb4c86bdaff42e131325585b9824cfaf497378f18b161ecbdb5bac5d0d2e4531f",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://agnostic-relay.net/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.010503503622909714
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xb4c86bdaff42e131325585b9824cfaf497378f18b161ecbdb5bac5d0d2e4531f",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "teku/v25.4.1",
+            "relay": "\\\"https://agnostic-relay.net/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.010503503622909714
+          }
+        ],
+        "payload_start_ms_into_slot": 1595,
+        "block_hash": "0x111e5d5f8b5b040c54e487c6cbd86220beb737a4cc02bc4dfe79a95cd25b9ed4"
+      },
+      "is_proxy_win": false,
+      "is_winning_bid_highest": true,
+      "el_reward_increase_wei": "0",
+      "el_reward_increase_eth": "0.000000000000000000",
+      "onchain_bid_value": 0.013857583318536154,
+      "second_highest_bid_value": 0.0,
+      "onchain_bid_delivered_relay": "relay.ultrasound.money",
+      "second_higher_bid_delivered_relay": "",
+      "is_payload_received": true,
+      "el_reward_increase_percentage": 0,
+      "el_reward_increase_percent_precise": 0.0,
+      "equal_to_proxy_bidders": "\\\"https://relay.ultrasound.money/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\, \\\"https://relay.ultrasound.money/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+      "is_equal_to_proxy_bid": true,
+      "fee_per_block": 0.0
+    },
+    "07cd0fce-edee-4325-9cf5-dcb6ca8ba3be": {
+      "slot_uid": "07cd0fce-edee-4325-9cf5-dcb6ca8ba3be",
+      "slot": "11645073",
+      "block_number": "",
+      "info": {
+        "header_start_ms_into_slot": 213,
+        "bids": [
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x8bced15d27e8e5a583aac9ea15a86776e662741864ce15d290adae61862c839e",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"https://relay.ultrasound.money/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.013684773025203338
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xfd2babbc9d8695332aa88b1e32fd575403a4ed4bac3388e12530b57b97132d14",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"http://relay-proxy.blxrbdn.com:18550/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c?id=Everstake&auth=YmU1YjY0YzItZWUzMy00N2M3LTg2MTAtMjYyYTViMzhhNzNiOmFjYjdkNDMxOGJhMWRmNTYzZjg4YjY0ZGIxZWIyMmZh\\",
+            "bid_value": 0.013670534915227506
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x1c464a64a554a3d438bbc7f937a44b209504930ae9cbfbb1fbc946a6ae539734",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"http://relay-proxy.blxrbdn.com:18551/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c?id=Everstake&auth=YmU1YjY0YzItZWUzMy00N2M3LTg2MTAtMjYyYTViMzhhNzNiOmFjYjdkNDMxOGJhMWRmNTYzZjg4YjY0ZGIxZWIyMmZh\\",
+            "bid_value": 0.013668190115227507
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x0ffb80114d035d11cd97fa1a852819aee558d8da0c85164f9e37bd5f342a1f95",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"https://aestus.live/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.011560057369664901
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x1c2f6ec1f6e5cda2d779ef15e00b4328d98059ae2a400d0e17f7615db25fa340",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"https://global.titanrelay.xyz/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.011560057369664771
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x1c2f6ec1f6e5cda2d779ef15e00b4328d98059ae2a400d0e17f7615db25fa340",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"https://regional.titanrelay.xyz/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.011560057369664771
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xe918950c18c58b05a2a9fb29d8eb3cfae17ece028467c48b3ba828b249605d80",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"https://bloxroute.max-profit.blxrbdn.com/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.011327692921765721
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xe918950c18c58b05a2a9fb29d8eb3cfae17ece028467c48b3ba828b249605d80",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"https://bloxroute.regulated.blxrbdn.com/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.011327692921765721
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x321ae6a5f388cf2c403542700d36ef18a6a7bc68510dc587a4e167200dbfc731",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"https://boost-relay.flashbots.net/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.01095542317708909
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xb4c86bdaff42e131325585b9824cfaf497378f18b161ecbdb5bac5d0d2e4531f",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Prysm/v6.0.1/204302a821da57632ec4e2d89126a21f00bd2817",
+            "relay": "\\\"https://agnostic-relay.net/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.010503503622909714
+          }
+        ],
+        "payload_start_ms_into_slot": 1612,
+        "block_hash": "0x111e5d5f8b5b040c54e487c6cbd86220beb737a4cc02bc4dfe79a95cd25b9ed4"
+      },
+      "is_proxy_win": false,
+      "is_winning_bid_highest": false,
+      "el_reward_increase_wei": "0",
+      "el_reward_increase_eth": "0.000000000000000000",
+      "onchain_bid_value": 0.0,
+      "second_highest_bid_value": 0.0,
+      "onchain_bid_delivered_relay": "",
+      "second_higher_bid_delivered_relay": "",
+      "is_payload_received": false,
+      "el_reward_increase_percentage": 0,
+      "el_reward_increase_percent_precise": 0.0,
+      "equal_to_proxy_bidders": "",
+      "is_equal_to_proxy_bid": false,
+      "fee_per_block": 0.0
+    },
+    "1fecf30c-3f03-44bd-860d-786797420227": {
+      "slot_uid": "1fecf30c-3f03-44bd-860d-786797420227",
+      "slot": "11645073",
+      "block_number": "22427177",
+      "info": {
+        "header_start_ms_into_slot": 299,
+        "bids": [
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x4b56eeaced5efe1e7290a12204bad7602910813cd4151b14b6dd0eaf057290a6",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"http://relay-proxy.blxrbdn.com:18550/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c?id=Everstake&auth=YmU1YjY0YzItZWUzMy00N2M3LTg2MTAtMjYyYTViMzhhNzNiOmFjYjdkNDMxOGJhMWRmNTYzZjg4YjY0ZGIxZWIyMmZh\\",
+            "bid_value": 0.014000171512594832
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x111e5d5f8b5b040c54e487c6cbd86220beb737a4cc02bc4dfe79a95cd25b9ed4",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"http://relay-proxy.blxrbdn.com:18551/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c?id=Everstake&auth=YmU1YjY0YzItZWUzMy00N2M3LTg2MTAtMjYyYTViMzhhNzNiOmFjYjdkNDMxOGJhMWRmNTYzZjg4YjY0ZGIxZWIyMmZh\\",
+            "bid_value": 0.013857583318536154
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xae8a1af72c62a1737212c50218a4b96a9468be473d524303a3e1fd262505fa5b",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"https://relay.ultrasound.money/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.0136928474381343
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x8fc693f0ab9c34203435cb253f8f880752749bf1d62e5dd636d5960048791447",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"https://global.titanrelay.xyz/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.013044216245895881
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x8fc693f0ab9c34203435cb253f8f880752749bf1d62e5dd636d5960048791447",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"https://regional.titanrelay.xyz/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.013044216245895881
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x8fc693f0ab9c34203435cb253f8f880752749bf1d62e5dd636d5960048791447",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"https://aestus.live/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.013044216245895881
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xc67f09476342b062c2c958284a48af7ae4bff1cbfc6e43a0bccd9d5db7c3c29c",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"https://bloxroute.max-profit.blxrbdn.com/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.011327692921765721
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xc67f09476342b062c2c958284a48af7ae4bff1cbfc6e43a0bccd9d5db7c3c29c",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"https://bloxroute.regulated.blxrbdn.com/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.011327692921765721
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0x321ae6a5f388cf2c403542700d36ef18a6a7bc68510dc587a4e167200dbfc731",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"https://boost-relay.flashbots.net/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.01095542317708909
+          },
+          {
+            "timestamp": 0,
+            "pubkey": "0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c",
+            "block_hash": "0xb4c86bdaff42e131325585b9824cfaf497378f18b161ecbdb5bac5d0d2e4531f",
+            "parent_hash": "0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5",
+            "block_number": "22427177",
+            "slot": "11645073",
+            "ua": "Lighthouse/v7.0.1-e42406d",
+            "relay": "\\\"https://agnostic-relay.net/eth/v1/builder/header/11645073/0x1866acb8dedb9905a44ecfcb5941b712bc8666076f107c811fbaf7dd6bbc2bb5/0xb3d18bea077a012bdcda688c242a1b4daf7e519c441384f02caab8fe99a6507c86bc6e9bdedcd3ff118450a030423b2c\\",
+            "bid_value": 0.010503503622909714
+          }
+        ],
+        "payload_start_ms_into_slot": 1639,
+        "block_hash": "0x111e5d5f8b5b040c54e487c6cbd86220beb737a4cc02bc4dfe79a95cd25b9ed4"
+      },
+      "is_proxy_win": true,
+      "is_winning_bid_highest": false,
+      "el_reward_increase_wei": "164735880401853",
+      "el_reward_increase_eth": "0.000164735880401853",
+      "onchain_bid_value": 0.013857583318536154,
+      "second_highest_bid_value": 0.0136928474381343,
+      "onchain_bid_delivered_relay": "relay-proxy.blxrbdn.com",
+      "second_higher_bid_delivered_relay": "relay.ultrasound.money",
+      "is_payload_received": false,
+      "el_reward_increase_percentage": 1,
+      "el_reward_increase_percent_precise": 1.1887778454234466,
+      "equal_to_proxy_bidders": "",
+      "is_equal_to_proxy_bid": false,
+      "fee_per_block": 0.0
+    }
+  }
+}
