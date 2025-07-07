@@ -197,6 +197,36 @@ pub struct Bid {
 }
 
 
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntryMEVBoost {
+    pub level: String,
+    pub method: String,
+    pub msg: String,
+    pub slot: String,
+    #[serde(rename = "slotUID", default)]
+    pub slot_uid: String,
+    pub time: String,
+    #[serde(default)]
+    pub block_hash: String,
+    #[serde(default)]
+    pub parent_hash: String,
+    #[serde(default)]
+    pub ua: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub version: String,
+    // Optional only needed for `getHeader` -> bid received
+    #[serde(default)]
+    pub block_number: Option<i64>,
+    #[serde(default)]
+    pub pubkey: Option<String>,
+    #[serde(default)]
+    pub tx_root: Option<String>,
+    #[serde(default)]
+    pub value: Option<String>,
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct SlotInfoWithoutBids<'a> {
