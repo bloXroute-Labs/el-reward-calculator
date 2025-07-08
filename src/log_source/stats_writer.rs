@@ -10,6 +10,9 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Write, Result as IoResult};
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
+
 
 pub trait RewardStats: Clone {
     fn get_uid(&self) -> &str;
@@ -18,20 +21,20 @@ pub trait RewardStats: Clone {
     fn get_block_hash(&self) -> &str;
     fn get_header_start(&self) -> i64;
     fn get_payload_start(&self) -> i64;
-    fn get_onchain_bid_value(&self) -> f64;
-    fn get_el_reward_eth(&self) -> f64;
+    fn get_onchain_bid_value(&self) -> Decimal;
+    fn get_el_reward_eth(&self) -> Decimal;
     fn get_el_reward_wei(&self) -> U256;
     fn get_is_proxy_win(&self) -> bool;
     fn get_is_winning_bid_highest(&self) -> bool;
-    fn get_second_highest_bid_value(&self) -> f64;
+    fn get_second_highest_bid_value(&self) -> Decimal;
     fn get_second_higher_bid_delivered_relay(&self) -> &str;
     fn get_onchain_bid_delivered_relay(&self) -> &str;
     fn get_is_payload_received(&self) -> bool;
     fn get_el_reward_percentage(&self) -> u64;
-    fn get_el_reward_precise(&self) -> f64;
+    fn get_el_reward_precise(&self) -> Decimal;
     fn get_equal_to_proxy_bidders(&self) -> &str;
     fn is_equal_to_proxy_bid(&self) -> bool;
-    fn get_fee_per_block(&self) -> f64;
+    fn get_fee_per_block(&self) -> Decimal;
 }
 
 impl RewardStats for SlotInfo {
@@ -41,20 +44,20 @@ impl RewardStats for SlotInfo {
     fn get_block_hash(&self) -> &str { &self.info.block_hash }
     fn get_header_start(&self) -> i64 { self.info.header_start_ms_into_slot }
     fn get_payload_start(&self) -> i64 { self.info.payload_start_ms_into_slot }
-    fn get_onchain_bid_value(&self) -> f64 { self.onchain_bid_value }
-    fn get_el_reward_eth(&self) -> f64 { self.el_reward_increase_eth }
+    fn get_onchain_bid_value(&self) -> Decimal { self.onchain_bid_value }
+    fn get_el_reward_eth(&self) -> Decimal { self.el_reward_increase_eth }
     fn get_el_reward_wei(&self) -> U256 { self.el_reward_increase_wei.clone() }
     fn get_is_proxy_win(&self) -> bool { self.is_proxy_win }
     fn get_is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
-    fn get_second_highest_bid_value(&self) -> f64 { self.second_highest_bid_value }
+    fn get_second_highest_bid_value(&self) -> Decimal { self.second_highest_bid_value }
     fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
     fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
     fn get_is_payload_received(&self) -> bool { self.is_payload_received }
     fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
-    fn get_el_reward_precise(&self) -> f64 { self.el_reward_increase_percent_precise }
+    fn get_el_reward_precise(&self) -> Decimal { self.el_reward_increase_percent_precise }
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
     fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
-    fn get_fee_per_block(&self) -> f64 { self.fee_per_block }
+    fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
 }
 
 impl RewardStats for CommitBoostSlotInfo {
@@ -64,20 +67,20 @@ impl RewardStats for CommitBoostSlotInfo {
     fn get_block_hash(&self) -> &str { &self.block_hash }
     fn get_header_start(&self) -> i64 {0 }
     fn get_payload_start(&self) -> i64 { 0}
-    fn get_onchain_bid_value(&self) -> f64 { self.onchain_bid_value }
-    fn get_el_reward_eth(&self) -> f64 { self.el_reward_increase_eth }
+    fn get_onchain_bid_value(&self) -> Decimal { self.onchain_bid_value }
+    fn get_el_reward_eth(&self) -> Decimal { self.el_reward_increase_eth }
     fn get_el_reward_wei(&self) -> U256 { self.el_reward_increase_wei.clone() }
     fn get_is_proxy_win(&self) -> bool { self.is_proxy_win }
     fn get_is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
-    fn get_second_highest_bid_value(&self) -> f64 { self.second_highest_bid_value }
+    fn get_second_highest_bid_value(&self) -> Decimal { self.second_highest_bid_value }
     fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
     fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
     fn get_is_payload_received(&self) -> bool { self.is_payload_received }
     fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
-    fn get_el_reward_precise(&self) -> f64 { self.el_reward_increase_percent_precise }
+    fn get_el_reward_precise(&self) -> Decimal { self.el_reward_increase_percent_precise }
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
     fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
-    fn get_fee_per_block(&self) -> f64 { self.fee_per_block }
+    fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
 }
 
 pub fn select_final_slot_infos_generic<T>(
@@ -94,7 +97,8 @@ where
         let proxy_wins: Vec<_> = slot_info_with_uid
             .values()
             .filter(|si| {
-                let valid = si.get_is_proxy_win() && si.get_el_reward_eth().is_finite();
+                let value = si.get_el_reward_eth();
+                let valid = si.get_is_proxy_win() && value > Decimal::ZERO;
                 if si.get_is_proxy_win() {
                     debug!(
                         "[SELECT] slot_uid={} is_proxy_win=true el_reward_increase_eth={} valid={}",
@@ -216,24 +220,31 @@ where
     Ok(())
 }
 
-pub fn write_summary_generic<T: RewardStats>(
-    slot_infos: &HashMap<String, T>,
+pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
+    selected_infos: &HashMap<String, T>,
     folder_path: &str,
     date_str: &str,
     time_str: &str,
+    all_infos: &[T], // full list passed in
 ) -> std::io::Result<()> {
-    let total_slots = slot_infos.len();
+    let total_slots = selected_infos.len();
     let mut slots_won_by_rproxy = 0;
-    let mut total_eth = 0.0f64;
-    let mut total_eth_overall = 0.0f64;
-    let mut reward_improvement_eth = 0.0f64;
+    let mut total_eth = Decimal::ZERO;
+    let mut total_eth_overall = Decimal::ZERO;
+    let mut reward_improvement_eth = Decimal::ZERO;
 
+    println!("Total slot_infos parsed_before: {}", selected_infos.len());
     // Sort by UID for deterministic accumulation
-    let mut sorted_infos: Vec<_> = slot_infos.values().collect();
+    let mut sorted_infos: Vec<_> = selected_infos.values().collect();
     sorted_infos.sort_by(|a, b| a.get_uid().cmp(&b.get_uid()));
+    let checksum: Decimal = sorted_infos.iter().map(|i| i.get_onchain_bid_value()).sum();
+    println!("Total ETH Checksum: {:.18}", checksum);
 
     for info in sorted_infos {
-        total_eth_overall += info.get_onchain_bid_value();
+        if info.get_onchain_bid_value() > Decimal::ZERO {
+            total_eth_overall += info.get_onchain_bid_value();
+        }
+
         if info.get_is_proxy_win() {
             slots_won_by_rproxy += 1;
             total_eth += info.get_onchain_bid_value();
@@ -241,13 +252,14 @@ pub fn write_summary_generic<T: RewardStats>(
         }
     }
 
-    let improvement_percentage = if total_eth > 0.0 {
-        (reward_improvement_eth / total_eth) * 100.0
+
+    let improvement_percentage = if total_eth > Decimal::ZERO {
+        (reward_improvement_eth / total_eth) * dec!(100.0)
     } else {
-        0.0
+        Decimal::ZERO
     };
 
-    let owed_to_blxr = reward_improvement_eth * 0.5;
+    let owed_to_blxr = reward_improvement_eth * dec!(0.5);
 
     let summary_path = format!("{}/summary_{}_{}.txt", folder_path, date_str, time_str);
     let mut file = File::create(&summary_path)?;
@@ -278,6 +290,30 @@ pub fn write_summary_generic<T: RewardStats>(
         improvement_percentage
     );
     println!("50% Owed to BLXR      : {:.18} ETH", owed_to_blxr);
+
+
+    // Write filtered out slots
+     let filtered_path = format!("{}/filtered_out_{}_{}.log", folder_path, date_str, time_str);
+     let mut filtered_file = File::create(&filtered_path)?;
+
+     let selected_uids: std::collections::HashSet<&String> = selected_infos.keys().collect();
+     let selected_uids: std::collections::HashSet<&str> = selected_infos.keys().map(|s| s.as_str()).collect();
+
+
+     for info in all_infos {
+         if !selected_uids.contains(info.get_uid().as_str()) {
+             writeln!(
+                 filtered_file,
+                 "[Filtered] UID: {}, Slot: {}, Block: {}, Bid: {}, Relay: {}, BlockHash: {}",
+                 info.get_uid(),
+                 info.get_slot(),
+                 info.get_block_number(),
+                 info.get_onchain_bid_value(),
+                 info.get_onchain_bid_delivered_relay(),
+                 info.get_block_hash(),
+             )?;
+         }
+     }
 
     Ok(())
 }

@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::Serializer;
@@ -24,22 +25,22 @@ pub struct CommitBoostSlotInfo {
     pub is_winning_bid_highest: bool,
     #[serde(serialize_with = "u256_to_string")]
     pub el_reward_increase_wei: U256,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub el_reward_increase_eth: f64,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub onchain_bid_value: f64,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub second_highest_bid_value: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub el_reward_increase_eth: Decimal,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub onchain_bid_value: Decimal,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub second_highest_bid_value: Decimal,
     pub onchain_bid_delivered_relay: String,
     pub second_higher_bid_delivered_relay: String,
     pub is_payload_received: bool,
     pub el_reward_increase_percentage: u64,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub el_reward_increase_percent_precise: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub el_reward_increase_percent_precise: Decimal,
     pub equal_to_proxy_bidders: String,
     pub is_equal_to_proxy_bid: bool,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub fee_per_block: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub fee_per_block: Decimal,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -154,18 +155,18 @@ pub struct SlotInfo {
     pub is_winning_bid_highest: bool,
     #[serde(serialize_with = "u256_to_string")]
     pub el_reward_increase_wei: U256,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub el_reward_increase_eth: f64,
-    pub onchain_bid_value: f64,
-    pub second_highest_bid_value: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub el_reward_increase_eth: Decimal,
+    pub onchain_bid_value: Decimal,
+    pub second_highest_bid_value: Decimal,
     pub onchain_bid_delivered_relay: String,
     pub second_higher_bid_delivered_relay: String,
     pub is_payload_received: bool,
     pub el_reward_increase_percentage: u64,
-    pub el_reward_increase_percent_precise: f64,
+    pub el_reward_increase_percent_precise: Decimal,
     pub equal_to_proxy_bidders: String,
     pub is_equal_to_proxy_bid: bool,
-    pub fee_per_block: f64,
+    pub fee_per_block: Decimal,
 }
 
 pub fn u256_to_string<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
@@ -193,7 +194,7 @@ pub struct Bid {
     pub slot: String,
     pub ua: String,
     pub relay: String,
-    pub bid_value: f64,
+    pub bid_value: Decimal,
 }
 
 
@@ -208,26 +209,26 @@ pub struct SlotInfoWithoutBids<'a> {
     pub block_hash: &'a str,
     pub is_proxy_win: bool,
     pub is_winning_bid_highest: bool,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub el_reward_increase_eth: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub el_reward_increase_eth: Decimal,
     pub el_reward_increase_wei: U256,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub onchain_bid_value: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub onchain_bid_value: Decimal,
     pub onchain_bid_delivered_relay: String,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub second_highest_bid_value: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub second_highest_bid_value: Decimal,
     pub second_higher_bid_delivered_relay: String,
     pub is_payload_received: bool,
     pub el_reward_increase_percentage: u64,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub el_reward_increase_percent_precise: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub el_reward_increase_percent_precise: Decimal,
     pub equal_to_proxy_bidders: String,
     pub is_equal_to_proxy_bid: bool,
-    #[serde(serialize_with = "float_to_fixed")]
-    pub fee_per_block: f64,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub fee_per_block: Decimal,
 }
 
-pub fn float_to_fixed<S>(x: &f64, serializer: S) -> Result<S::Ok, S::Error>
+pub fn decimal_to_fixed<S>(x: &Decimal, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
@@ -243,18 +244,18 @@ impl SlotInfo {
             info: Default::default(),
             is_proxy_win: false,
             el_reward_increase_wei: U256::default(),
-            el_reward_increase_eth: 0.0,
-            onchain_bid_value: 0.0,
-            second_highest_bid_value: 0.0,
+            el_reward_increase_eth: Decimal::default(),
+            onchain_bid_value: Decimal::default(),
+            second_highest_bid_value: Decimal::default(),
             onchain_bid_delivered_relay: String::new(),
             second_higher_bid_delivered_relay: String::new(),
             is_winning_bid_highest: false,
             is_payload_received: false,
             el_reward_increase_percentage: 0,
-            el_reward_increase_percent_precise: 0.0,
+            el_reward_increase_percent_precise: Decimal::default(),
             equal_to_proxy_bidders:String::new(),
             is_equal_to_proxy_bid: false,
-            fee_per_block:0.0,
+            fee_per_block:Decimal::default(),
         }
     }
 
@@ -268,18 +269,18 @@ impl SlotInfo {
             info: Default::default(),
             is_proxy_win: false,
             el_reward_increase_wei: U256::default(),
-            el_reward_increase_eth: 0.0,
-            onchain_bid_value: 0.0,
-            second_highest_bid_value: 0.0,
+            el_reward_increase_eth: Decimal::default(),
+            onchain_bid_value: Decimal::default(),
+            second_highest_bid_value: Decimal::default(),
             onchain_bid_delivered_relay: String::new(),
             second_higher_bid_delivered_relay: String::new(),
             is_winning_bid_highest: false,
             is_payload_received: false,
             el_reward_increase_percentage: 0,
-            el_reward_increase_percent_precise: 0.0,
+            el_reward_increase_percent_precise: Decimal::default(),
             equal_to_proxy_bidders:String::new(),
             is_equal_to_proxy_bid: false,
-            fee_per_block:0.0,
+            fee_per_block:Decimal::default(),
         }
     }
 
@@ -296,18 +297,18 @@ impl CommitBoostSlotInfo {
             selected_req_id: None,
             is_proxy_win: false,
             el_reward_increase_wei: U256::default(),
-            el_reward_increase_eth: 0.0,
-            onchain_bid_value: 0.0,
-            second_highest_bid_value: 0.0,
+            el_reward_increase_eth: Decimal::default(),
+            onchain_bid_value: Decimal::default(),
+            second_highest_bid_value: Decimal::default(),
             onchain_bid_delivered_relay: String::new(),
             second_higher_bid_delivered_relay: String::new(),
             is_winning_bid_highest: false,
             is_payload_received: false,
             el_reward_increase_percentage: 0,
-            el_reward_increase_percent_precise: 0.0,
+            el_reward_increase_percent_precise: Decimal::default(),
             equal_to_proxy_bidders: String::new(),
             is_equal_to_proxy_bid: false,
-            fee_per_block: 0.0,
+            fee_per_block: Decimal::default(),
         }
     }
 }
@@ -320,18 +321,18 @@ pub trait SlotTrait {
     fn get_payload_start(&self) -> i64;
     fn is_proxy_win(&self) -> bool;
     fn is_winning_bid_highest(&self) -> bool;
-    fn get_el_reward_eth(&self) -> f64;
+    fn get_el_reward_eth(&self) -> Decimal;
     fn get_el_reward_wei(&self) -> U256;
-    fn get_onchain_bid_value(&self) -> f64;
+    fn get_onchain_bid_value(&self) -> Decimal;
     fn get_onchain_bid_delivered_relay(&self) -> &str;
-    fn get_second_highest_bid_value(&self) -> f64;
+    fn get_second_highest_bid_value(&self) -> Decimal;
     fn get_second_higher_bid_delivered_relay(&self) -> &str;
     fn is_payload_received(&self) -> bool;
     fn get_el_reward_percentage(&self) -> u64;
-    fn get_el_reward_precise(&self) -> f64;
+    fn get_el_reward_precise(&self) -> Decimal;
     fn get_equal_to_proxy_bidders(&self) -> &str;
     fn is_equal_to_proxy_bid(&self) -> bool;
-    fn get_fee_per_block(&self) -> f64;
+    fn get_fee_per_block(&self) -> Decimal;
 }
 
 impl SlotTrait for SlotInfo {
@@ -343,18 +344,18 @@ impl SlotTrait for SlotInfo {
     fn get_payload_start(&self) -> i64 { self.info.payload_start_ms_into_slot }
     fn is_proxy_win(&self) -> bool { self.is_proxy_win }
     fn is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
-    fn get_el_reward_eth(&self) -> f64 { self.el_reward_increase_eth }
+    fn get_el_reward_eth(&self) -> Decimal { self.el_reward_increase_eth }
     fn get_el_reward_wei(&self) -> U256 { self.el_reward_increase_wei.clone() }
-    fn get_onchain_bid_value(&self) -> f64 { self.onchain_bid_value }
+    fn get_onchain_bid_value(&self) -> Decimal { self.onchain_bid_value }
     fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
-    fn get_second_highest_bid_value(&self) -> f64 { self.second_highest_bid_value }
+    fn get_second_highest_bid_value(&self) -> Decimal { self.second_highest_bid_value }
     fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
     fn is_payload_received(&self) -> bool { self.is_payload_received }
     fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
-    fn get_el_reward_precise(&self) -> f64 { self.el_reward_increase_percent_precise }
+    fn get_el_reward_precise(&self) -> Decimal { self.el_reward_increase_percent_precise }
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
     fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
-    fn get_fee_per_block(&self) -> f64 { self.fee_per_block }
+    fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
 }
 
 impl SlotTrait for CommitBoostSlotInfo {
@@ -381,16 +382,16 @@ impl SlotTrait for CommitBoostSlotInfo {
 
     fn is_proxy_win(&self) -> bool { self.is_proxy_win }
     fn is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
-    fn get_el_reward_eth(&self) -> f64 { self.el_reward_increase_eth }
+    fn get_el_reward_eth(&self) -> Decimal { self.el_reward_increase_eth }
     fn get_el_reward_wei(&self) -> U256 { self.el_reward_increase_wei.clone() }
-    fn get_onchain_bid_value(&self) -> f64 { self.onchain_bid_value }
+    fn get_onchain_bid_value(&self) -> Decimal { self.onchain_bid_value }
     fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
-    fn get_second_highest_bid_value(&self) -> f64 { self.second_highest_bid_value }
+    fn get_second_highest_bid_value(&self) -> Decimal { self.second_highest_bid_value }
     fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
     fn is_payload_received(&self) -> bool { self.selected_req_id.is_some() }
     fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
-    fn get_el_reward_precise(&self) -> f64 { self.el_reward_increase_percent_precise }
+    fn get_el_reward_precise(&self) -> Decimal { self.el_reward_increase_percent_precise }
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
     fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
-    fn get_fee_per_block(&self) -> f64 { self.fee_per_block }
+    fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
 }
