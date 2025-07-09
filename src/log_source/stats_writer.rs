@@ -227,7 +227,7 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
     date_str: &str,
     time_str: &str,
     all_infos: &[T],
-    skipped_infos: &[(T, Vec<&'static str>)],
+    skipped_infos: &HashMap<String, Vec<(String, T, Vec<&'static str>)>>,
 ) -> std::io::Result<()> {
     let total_slots = selected_infos.len();
     let mut slots_won_by_rproxy = 0;
@@ -298,18 +298,20 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
     let skipped_path = format!("{}/skipped_out_{}_{}.log", skipped_dir, date_str, time_str);
     let mut skipped_file = File::create(&skipped_path)?;
 
-    for (info, reasons) in skipped_infos {
-        writeln!(
-            skipped_file,
-            "[Filtered] UID: {}, Slot: {}, Block: {}, Bid: {}, Relay: {}, BlockHash: {}, Reasons: {:?}",
-            info.get_uid(),
-            info.get_slot(),
-            info.get_block_number(),
-            info.get_onchain_bid_value(),
-            info.get_onchain_bid_delivered_relay(),
-            info.get_block_hash(),
-            reasons
-        )?;
+    for (slot, entries) in skipped_infos {
+        for (slot_uid, info, reasons) in entries {
+            writeln!(
+                skipped_file,
+                "[Filtered] Slot: {}, UID: {}, Block: {}, Bid: {}, Relay: {}, BlockHash: {}, Reasons: {:?}",
+                slot,
+                slot_uid,
+                info.get_block_number(),
+                info.get_onchain_bid_value(),
+                info.get_onchain_bid_delivered_relay(),
+                info.get_block_hash(),
+                reasons
+            )?;
+        }
     }
 
     Ok(())
