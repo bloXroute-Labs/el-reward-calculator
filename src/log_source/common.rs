@@ -28,7 +28,7 @@ pub fn parse_url(bid: &Bid) -> String {
 /// - selected slotInfos
 /// - selected UID->SlotInfo map
 /// - skipped slots grouped by slot number (if all SlotUIDs are skipped for that slot)
-pub fn filter_valid_slot_infos<T: RewardStats + Clone>(
+pub fn filter_valid_slot_infos<T: RewardStats + Clone + std::fmt::Debug>(
     slot_infos: &HashMap<String, HashMap<String, T>>,
 ) -> (
     Vec<T>, // all_infos
@@ -63,9 +63,7 @@ pub fn filter_valid_slot_infos<T: RewardStats + Clone>(
                 selected_uid_set.insert(slot_uid.clone());
                 all_slot_uids_skipped = false;
             } else {
-                skipped_by_slot.entry(slot.clone())
-                    .or_default()
-                    .push((slot_uid.clone(), info.clone(), reasons));
+                skipped_by_slot.entry(slot.clone()).or_default().push((slot_uid.clone(), info.clone(), reasons));
             }
         }
 
@@ -81,7 +79,7 @@ pub fn filter_valid_slot_infos<T: RewardStats + Clone>(
 
     let skipped_count = skipped_by_slot.values().map(|v| v.len()).sum::<usize>();
     println!(
-        "SlotInfo completeness filter: total={}, selected={}, skipped_slots={}, skipped_uids={}",
+        "SlotInfo completeness filter: total_slots={}, selected_uids={}, skipped_slots={}, skipped_uids={}",
         slot_infos.len(),
         selected_infos.len(),
         skipped_by_slot.len(),

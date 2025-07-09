@@ -13,6 +13,7 @@ use std::io::{Write, Result as IoResult};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::fs;
+use serde_json::to_string_pretty;
 
 
 pub trait RewardStats: Clone {
@@ -221,13 +222,14 @@ where
     Ok(())
 }
 
-pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
+/// Writes the summary and logs skipped infos to JSON
+pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     selected_infos: &HashMap<String, T>,
     folder_path: &str,
     date_str: &str,
     time_str: &str,
     all_infos: &[T],
-    skipped_infos: &HashMap<String, Vec<(String, T, Vec<&'static str>)>>,
+    skipped_infos:  &HashMap<String, Vec<(String, T, Vec<&'static str>)>> ,
 ) -> std::io::Result<()> {
     let total_slots = selected_infos.len();
     let mut slots_won_by_rproxy = 0;
@@ -236,7 +238,6 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
     let mut reward_improvement_eth = Decimal::ZERO;
 
     println!("Total slot_infos parsed_before: {}", selected_infos.len());
-    // Sort by UID for deterministic accumulation
     let mut sorted_infos: Vec<_> = selected_infos.values().collect();
     sorted_infos.sort_by(|a, b| a.get_uid().cmp(&b.get_uid()));
     let checksum: Decimal = sorted_infos.iter().map(|i| i.get_onchain_bid_value()).sum();
@@ -279,7 +280,6 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
     )?;
     writeln!(file, "50% Owed to BLXR      : {:.18} ETH", owed_to_blxr)?;
 
-    // Print to console as well
     println!("Total Slots              : {}", total_slots);
     println!("total eth overall        : {:.18} ETH", total_eth_overall);
     println!("Slots won by Rproxy      : {}", slots_won_by_rproxy);
@@ -292,27 +292,32 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
     );
     println!("50% Owed to BLXR      : {:.18} ETH", owed_to_blxr);
 
-    // Write skipped infos with reasons
     let skipped_dir = format!("{}/skipped", folder_path);
     fs::create_dir_all(&skipped_dir)?;
-    let skipped_path = format!("{}/skipped_out_{}_{}.log", skipped_dir, date_str, time_str);
+    let skipped_path = format!("{}/skipped_out_{}_{}.json", skipped_dir, date_str, time_str);
     let mut skipped_file = File::create(&skipped_path)?;
 
+    log_skipped_infos(skipped_infos, &mut skipped_file)?;
+
+    Ok(())
+}
+
+
+/// Logs skipped slot infos fully in JSON format
+pub fn log_skipped_infos<T: std::fmt::Debug + Serialize>(
+    skipped_infos: &HashMap<String, Vec<(String, T, Vec<&'static str>)>>,
+    file: &mut File,
+) -> std::io::Result<()> {
     for (slot, entries) in skipped_infos {
         for (slot_uid, info, reasons) in entries {
-            writeln!(
-                skipped_file,
-                "[Filtered] Slot: {}, UID: {}, Block: {}, Bid: {}, Relay: {}, BlockHash: {}, Reasons: {:?}",
-                slot,
-                slot_uid,
-                info.get_block_number(),
-                info.get_onchain_bid_value(),
-                info.get_onchain_bid_delivered_relay(),
-                info.get_block_hash(),
-                reasons
-            )?;
+            let json_entry = serde_json::json!({
+                "slot": slot,
+                "slot_uid": slot_uid,
+                "reasons": reasons,
+                "info": info
+            });
+            writeln!(file, "{}", to_string_pretty(&json_entry).unwrap())?;
         }
     }
-
     Ok(())
 }
