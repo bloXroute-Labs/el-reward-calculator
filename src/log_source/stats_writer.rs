@@ -12,6 +12,7 @@ use std::fs::File;
 use std::io::{Write, Result as IoResult};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use std::fs;
 
 
 pub trait RewardStats: Clone {
@@ -225,7 +226,8 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
     folder_path: &str,
     date_str: &str,
     time_str: &str,
-    all_infos: &[T], // full list passed in
+    all_infos: &[T],
+    skipped_infos: &[(T, Vec<&'static str>)],
 ) -> std::io::Result<()> {
     let total_slots = selected_infos.len();
     let mut slots_won_by_rproxy = 0;
@@ -251,7 +253,6 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
             reward_improvement_eth += info.get_el_reward_eth();
         }
     }
-
 
     let improvement_percentage = if total_eth > Decimal::ZERO {
         (reward_improvement_eth / total_eth) * dec!(100.0)
@@ -291,29 +292,25 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug>(
     );
     println!("50% Owed to BLXR      : {:.18} ETH", owed_to_blxr);
 
+    // Write skipped infos with reasons
+    let skipped_dir = format!("{}/skipped", folder_path);
+    fs::create_dir_all(&skipped_dir)?;
+    let skipped_path = format!("{}/skipped_out_{}_{}.log", skipped_dir, date_str, time_str);
+    let mut skipped_file = File::create(&skipped_path)?;
 
-    // Write filtered out slots
-     let filtered_path = format!("{}/filtered_out_{}_{}.log", folder_path, date_str, time_str);
-     let mut filtered_file = File::create(&filtered_path)?;
-
-     let selected_uids: std::collections::HashSet<&String> = selected_infos.keys().collect();
-     let selected_uids: std::collections::HashSet<&str> = selected_infos.keys().map(|s| s.as_str()).collect();
-
-
-     for info in all_infos {
-         if !selected_uids.contains(info.get_uid().as_str()) {
-             writeln!(
-                 filtered_file,
-                 "[Filtered] UID: {}, Slot: {}, Block: {}, Bid: {}, Relay: {}, BlockHash: {}",
-                 info.get_uid(),
-                 info.get_slot(),
-                 info.get_block_number(),
-                 info.get_onchain_bid_value(),
-                 info.get_onchain_bid_delivered_relay(),
-                 info.get_block_hash(),
-             )?;
-         }
-     }
+    for (info, reasons) in skipped_infos {
+        writeln!(
+            skipped_file,
+            "[Filtered] UID: {}, Slot: {}, Block: {}, Bid: {}, Relay: {}, BlockHash: {}, Reasons: {:?}",
+            info.get_uid(),
+            info.get_slot(),
+            info.get_block_number(),
+            info.get_onchain_bid_value(),
+            info.get_onchain_bid_delivered_relay(),
+            info.get_block_hash(),
+            reasons
+        )?;
+    }
 
     Ok(())
 }

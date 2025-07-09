@@ -112,7 +112,7 @@ fn main() -> IoResult<()>  {
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, _skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
 
                match output_format {
                    "csv" => {
@@ -130,6 +130,7 @@ fn main() -> IoResult<()>  {
                    &date_str,
                    &time_str,
                    &selected_infos, // full vec passed for debug
+                   &skipped,
                )?;
 
            }
@@ -145,7 +146,7 @@ fn main() -> IoResult<()>  {
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, _skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
 
                match output_format {
                    "csv" => {
@@ -163,6 +164,7 @@ fn main() -> IoResult<()>  {
                    &date_str,
                    &time_str,
                    &selected_infos, // full vec passed for debug
+                   &skipped,
                )?;
 
            }
@@ -174,7 +176,7 @@ fn main() -> IoResult<()>  {
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, _skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
 
                match output_format {
                    "csv" => {
@@ -192,6 +194,7 @@ fn main() -> IoResult<()>  {
                    &date_str,
                    &time_str,
                    &selected_infos, // full vec passed for debug
+                   &skipped,
                )?;
            }
 
@@ -201,7 +204,7 @@ fn main() -> IoResult<()>  {
                // Always select final infos once
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, _skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
 
                match output_format {
                    "csv" => {
@@ -219,6 +222,7 @@ fn main() -> IoResult<()>  {
                    &date_str,
                    &time_str,
                    &selected_infos, // full vec passed for debug
+                   &skipped,
                )?;
            }
 
@@ -234,7 +238,7 @@ fn main() -> IoResult<()>  {
 
                mevboost_text::finalize_slot_infos(&mut slot_infos);
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, _skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
 
                match output_format {
                    "csv" => {
@@ -252,6 +256,7 @@ fn main() -> IoResult<()>  {
                    &date_str,
                    &time_str,
                    &selected_infos, // full vec passed for debug
+                   &skipped,
                )?;
 
            }

@@ -25,43 +25,57 @@ pub fn parse_url(bid: &Bid) -> String {
 
 /// Filters valid slot infos based on completeness and returns a map of UID -> SlotInfo
 /// Also returns the original flattened list and number skipped (for diagnostics).
-pub fn filter_valid_slot_infos<T>(slot_infos: &HashMap<String, HashMap<String, T>>)
-    -> (Vec<T>,Vec<T>, HashMap<String, T>, usize)
+pub fn filter_valid_slot_infos<T>(
+    slot_infos: &HashMap<String, HashMap<String, T>>,
+) -> (
+    Vec<T>,                  // all_infos
+    Vec<T>,                  // selected_infos
+    HashMap<String, T>,      // selected_infos_map
+    Vec<(T, Vec<&'static str>)>, // skipped_with_reasons
+)
 where
     T: RewardStats + Clone,
 {
-    // Flatten everything
     let all_infos: Vec<T> = slot_infos
         .iter()
         .flat_map(|(_, inner)| inner.values())
         .cloned()
         .collect();
 
-    // Select valid ones
-    let selected_infos: Vec<T> = all_infos
-        .iter()
-        .filter(|si| {
-            !si.get_block_hash().is_empty()
-                && si.get_onchain_bid_value() > Decimal::ZERO
-                && !si.get_uid().is_empty()
-        })
-        .cloned()
-        .collect();
+    let mut selected_infos = Vec::new();
+    let mut skipped_with_reasons = Vec::new();
 
-    // Build a map for downstream processing
+    for info in &all_infos {
+        let mut reasons = Vec::new();
+
+        if info.get_uid().is_empty() {
+            reasons.push("UID empty");
+        }
+        if info.get_block_hash().is_empty() {
+            reasons.push("BlockHash empty");
+        }
+        if info.get_onchain_bid_value() <= Decimal::ZERO {
+            reasons.push("Bid is zero or negative");
+        }
+
+        if reasons.is_empty() {
+            selected_infos.push(info.clone());
+        } else {
+            skipped_with_reasons.push((info.clone(), reasons));
+        }
+    }
+
     let selected_infos_map = selected_infos
         .iter()
         .map(|si| (si.get_uid().to_string(), si.clone()))
         .collect::<HashMap<String, T>>();
 
-    let skipped = all_infos.len().saturating_sub(selected_infos.len());
-
     println!(
         "SlotInfo completeness filter: total={}, selected={}, skipped={}",
         all_infos.len(),
         selected_infos.len(),
-        skipped
+        skipped_with_reasons.len()
     );
 
-    (all_infos, selected_infos, selected_infos_map, skipped)
+    (all_infos, selected_infos, selected_infos_map, skipped_with_reasons)
 }
