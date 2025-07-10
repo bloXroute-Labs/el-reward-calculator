@@ -112,7 +112,7 @@ fn main() -> IoResult<()>  {
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos, "commit_boost_json");
 
                match output_format {
                    "csv" => {
@@ -146,7 +146,7 @@ fn main() -> IoResult<()>  {
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos, "commit_boost_text");
 
                match output_format {
                    "csv" => {
@@ -176,7 +176,7 @@ fn main() -> IoResult<()>  {
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos,"mev_boost_json");
 
                match output_format {
                    "csv" => {
@@ -204,14 +204,14 @@ fn main() -> IoResult<()>  {
                // Always select final infos once
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos_map, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos,"vouch");
 
                match output_format {
                    "csv" => {
                        stats_writer::write_csv_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                    }
                    _ => {
-                       stats_writer::write_json_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       stats_writer::write_json_generic(&all_infos_map, &folder_path, &date_str, &time_str)?;
                    }
                }
 
@@ -238,7 +238,7 @@ fn main() -> IoResult<()>  {
 
                mevboost_text::finalize_slot_infos(&mut slot_infos);
                // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos);
+               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos,"mev_boost_text");
 
                match output_format {
                    "csv" => {
