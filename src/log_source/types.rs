@@ -136,6 +136,7 @@ pub struct Message {
     pub slot: String,
     pub slotUID: String,
     pub time: String,
+    #[serde(alias = "ua", alias = "userAgent")]
     pub ua: String,
     pub url: Option<String>,
     pub version: String,

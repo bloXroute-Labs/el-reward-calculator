@@ -94,7 +94,7 @@ where
     let mut final_selected: HashMap<String, T> = HashMap::new();
 
     for (slot, slot_info_with_uid) in slot_infos {
-        debug!("Slot: {}, records: {:?}", slot, slot_info_with_uid);
+        //debug!("Slot: {}, records: {:?}", slot, slot_info_with_uid);
 
         let proxy_wins: Vec<_> = slot_info_with_uid
             .values()

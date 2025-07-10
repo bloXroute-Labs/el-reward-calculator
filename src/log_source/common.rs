@@ -6,7 +6,8 @@ use std::{collections::{HashMap, HashSet}, string};
 use crate::log_source::stats_writer::RewardStats;
 
 pub fn is_relay_proxy(relay: &str) -> bool {
-    relay.contains("relay-proxy") || relay.contains("Relay Proxy") || relay.contains("rproxy") || relay.contains("rpoxy") // handle typo
+    relay.contains("relay-proxy") || relay.contains("Relay Proxy") || relay.contains("rproxy") ||
+    relay.contains("rpoxy") || relay.contains("35.175.121.222")// handle typo
 }
 
 pub fn parse_url(bid: &Bid) -> String {
