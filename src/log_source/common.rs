@@ -1,7 +1,8 @@
-use crate::log_source::types::{Bid};
+use crate::log_source::types::{Bid, SlotInfo};
+use chrono::NaiveWeek;
 use url::Url;
 use rust_decimal::Decimal;
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, string};
 use crate::log_source::stats_writer::RewardStats;
 
 pub fn is_relay_proxy(relay: &str) -> bool {
@@ -22,40 +23,41 @@ pub fn parse_url(bid: &Bid) -> String {
 
 
 
-
 /// Filters valid slot infos based on completeness and returns:
-/// - all flattened slotInfos
-/// - selected slotInfos
-/// - selected UID->SlotInfo map
-/// - skipped slots grouped by slot number (if all SlotUIDs are skipped for that slot)
+/// - all_infos_map: UID -> SlotInfo for all entries
+/// - selected_infos: Vec of SlotInfo passing validation
+/// - selected_infos_map: UID -> SlotInfo passing validation
+/// - skipped_slots_by_slot: Slot -> Vec<(SlotUID, SlotInfo, Reasons)>
 pub fn filter_valid_slot_infos<T: RewardStats + Clone + std::fmt::Debug>(
     slot_infos: &HashMap<String, HashMap<String, T>>,
+    logsource: &str,
 ) -> (
-    Vec<T>, // all_infos
-    Vec<T>, // selected_infos
-    HashMap<String, T>, // selected_infos_map
+    HashMap<String, HashMap<String, T>>,                // all_infos_map
+    Vec<T>,                                             // selected_infos
+    HashMap<String, T>,                                 // selected_infos_map
     HashMap<String, Vec<(String, T, Vec<&'static str>)>> // skipped_slots_by_slot
 ) {
-    let mut all_infos = Vec::new();
+    let mut all_infos_map: HashMap<String, HashMap<String, T>> = HashMap::new();
     let mut selected_infos = Vec::new();
     let mut selected_uid_set: HashSet<String> = HashSet::new();
     let mut skipped_by_slot: HashMap<String, Vec<(String, T, Vec<&'static str>)>> = HashMap::new();
 
-    for (slot, slot_map) in slot_infos.iter() {
+    for (slot, slot_map) in slot_infos {
         let mut all_slot_uids_skipped = true;
+        all_infos_map.insert(slot.clone(), slot_map.clone());  // <-- keep full structure
 
-        for (slot_uid, info) in slot_map.iter() {
-            all_infos.push(info.clone());
+        for (slot_uid, info) in slot_map {
             let mut reasons = Vec::new();
-
-            if info.get_uid().is_empty() {
-                reasons.push("UID empty");
-            }
-            if info.get_block_hash().is_empty() {
-                reasons.push("BlockHash empty");
-            }
-            if info.get_onchain_bid_value() <= Decimal::ZERO {
-                reasons.push("Bid is zero or negative");
+            if logsource != "vouch" {
+                if info.get_uid().is_empty() {
+                    reasons.push("UID empty");
+                }
+                if info.get_block_hash().is_empty() {
+                    reasons.push("BlockHash empty");
+                }
+                if info.get_onchain_bid_value() <= Decimal::ZERO {
+                    reasons.push("Bid is zero or negative");
+                }
             }
 
             if reasons.is_empty() {
@@ -63,28 +65,38 @@ pub fn filter_valid_slot_infos<T: RewardStats + Clone + std::fmt::Debug>(
                 selected_uid_set.insert(slot_uid.clone());
                 all_slot_uids_skipped = false;
             } else {
-                skipped_by_slot.entry(slot.clone()).or_default().push((slot_uid.clone(), info.clone(), reasons));
+                skipped_by_slot
+                    .entry(slot.clone())
+                    .or_default()
+                    .push((slot_uid.clone(), info.clone(), reasons));
             }
         }
 
-        // If at least one was selected, remove the skipped records for this slot
         if !all_slot_uids_skipped {
             skipped_by_slot.remove(slot);
         }
     }
 
-    let selected_infos_map = selected_infos.iter()
+    let selected_infos_map = selected_infos
+        .iter()
         .map(|si| (si.get_uid().to_string(), si.clone()))
         .collect::<HashMap<String, T>>();
 
-    let skipped_count = skipped_by_slot.values().map(|v| v.len()).sum::<usize>();
+    let total_slot_count = slot_infos.len();
+    let total_slot_uid_count = slot_infos.values().map(|m| m.len()).sum::<usize>();
+    let selected_slot_uid_count = selected_infos.len();
+    let skipped_slot_count = skipped_by_slot.len();
+    let skipped_uid_count = skipped_by_slot.values().map(|v| v.len()).sum::<usize>();
+
     println!(
-        "SlotInfo completeness filter: total_slots={}, selected_uids={}, skipped_slots={}, skipped_uids={}",
-        slot_infos.len(),
-        selected_infos.len(),
-        skipped_by_slot.len(),
-        skipped_count
+        "SlotInfo completeness filter: total_slots={}, all_infos_map.len() = {}, total_slot_uids={}, selected_slot_uids={}, skipped_slots={}, skipped_uids={}",
+        total_slot_count,
+        all_infos_map.len(),
+        total_slot_uid_count,
+        selected_slot_uid_count,
+        skipped_slot_count,
+        skipped_uid_count
     );
 
-    (all_infos, selected_infos, selected_infos_map, skipped_by_slot)
+    (all_infos_map, selected_infos, selected_infos_map, skipped_by_slot)
 }

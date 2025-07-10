@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use crate::Bid;
 use url::Url;
 use ethers::types::U256;
-use ethers::utils::format_units;
 use crate::log_source::common::{is_relay_proxy, parse_url};
 use log::debug;
 
