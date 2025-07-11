@@ -236,6 +236,7 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     let mut total_eth = Decimal::ZERO;
     let mut total_eth_overall = Decimal::ZERO;
     let mut reward_improvement_eth = Decimal::ZERO;
+    let mut total_fee_per_block_eth= Decimal::ZERO;
 
     println!("Total slot_infos parsed_before: {}", selected_infos.len());
     let mut sorted_infos: Vec<_> = selected_infos.values().collect();
@@ -252,6 +253,7 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
             slots_won_by_rproxy += 1;
             total_eth += info.get_onchain_bid_value();
             reward_improvement_eth += info.get_el_reward_eth();
+            total_fee_per_block_eth += info.get_fee_per_block();
         }
     }
 
@@ -279,6 +281,7 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
         improvement_percentage
     )?;
     writeln!(file, "50% Owed to BLXR      : {:.18} ETH", owed_to_blxr)?;
+    writeln!(file, "Total fee per block : {:.18} ETH", total_fee_per_block_eth)?;
 
     println!("Total Slots              : {}", total_slots);
     println!("total eth overall        : {:.18} ETH", total_eth_overall);
@@ -291,6 +294,7 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
         improvement_percentage
     );
     println!("50% Owed to BLXR      : {:.18} ETH", owed_to_blxr);
+    println!("Total fee per block : {:.18} ETH", total_fee_per_block_eth);
 
     let skipped_dir = format!("{}/skipped", folder_path);
     fs::create_dir_all(&skipped_dir)?;
