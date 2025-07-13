@@ -1,8 +1,7 @@
-use crate::log_source::types::{Bid, SlotInfo};
-use chrono::NaiveWeek;
+use crate::log_source::types::Bid;
 use url::Url;
 use rust_decimal::Decimal;
-use std::{collections::{HashMap, HashSet}, string};
+use std::{collections::{HashMap, HashSet}};
 use crate::log_source::stats_writer::RewardStats;
 
 pub fn is_relay_proxy(relay: &str) -> bool {
