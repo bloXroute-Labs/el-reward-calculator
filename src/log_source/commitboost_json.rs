@@ -35,7 +35,6 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut CommitBo
             _ => eprintln!("Unsupported JSON entry encountered. Skipping."),
         }
     }
-    post_process_all_slots(slot_infos);
 }
 
 fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlotInfos) {
@@ -45,35 +44,46 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
     let slot_uid = format!("{}_{}", slot, parent_hash);
 
     let slot_info_map = slot_infos.entry(slot.clone()).or_insert_with(HashMap::new);
-    let slot_info = slot_info_map.entry(slot_uid.clone()).or_insert_with(|| {
-        debug!("[INIT] Creating CommitBoostSlotInfo for slot_uid: {}", slot_uid);
-        CommitBoostSlotInfo::new(slot_uid.clone(), slot.clone())
-    });
+
+    // Ensure merging happens if slot_uid already exists
+    let slot_info = slot_info_map
+        .entry(slot_uid.clone())
+        .and_modify(|existing| existing.merge_fields_from_log_entry(log_entry))
+        .or_insert_with(|| {
+            debug!("[INIT] Creating CommitBoostSlotInfo for slot_uid: {}", slot_uid);
+            CommitBoostSlotInfo::from_log_entry(log_entry, slot_uid.clone(), slot.clone())
+        });
 
     match span.method.as_str() {
         "/eth/v1/builder/header/{slot}/{parent_hash}/{pubkey}" => {
             if log_entry.message == "received new header" {
                 let req_id = span.req_id.clone().unwrap_or_else(|| "unknown_reqid".to_string());
+
                 let mut bid: Bid = Default::default();
+                if let Ok(date) = DateTime::parse_from_rfc3339(&log_entry.timestamp) {
+                    bid.timestamp = date.with_timezone(&Utc).timestamp();
+                }
 
-                let date = DateTime::parse_from_rfc3339(&log_entry.timestamp)
-                    .unwrap()
-                    .with_timezone(&Utc);
-
-                bid.timestamp = date.timestamp();
                 bid.slot = slot.clone();
                 bid.block_hash = log_entry.fields.block_hash.clone().unwrap_or_default();
-                bid.bid_value = log_entry.fields.value_eth.as_deref().unwrap_or("0.0").parse::<Decimal>().unwrap_or(Decimal::ZERO);
+                bid.bid_value = log_entry
+                    .fields
+                    .value_eth
+                    .as_deref()
+                    .unwrap_or("0.0")
+                    .parse::<Decimal>()
+                    .unwrap_or(Decimal::ZERO);
                 bid.relay = log_entry.fields.relay_id.clone().unwrap_or_default();
 
                 slot_info
                     .requests
-                    .entry(req_id.clone())
+                    .entry(req_id)
                     .or_insert_with(Default::default)
                     .bids
                     .push(bid);
             }
         }
+
         "/eth/v1/builder/blinded_blocks" => {
             if log_entry.message == "received unblinded block" {
                 let block_hash = span.block_hash.clone().unwrap_or_default();
@@ -86,18 +96,22 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
 
                 if !matched_req_ids.is_empty() {
                     matched_req_ids.sort_by(|(aid, a), (bid, b)| {
-                           let a_max = a.bids.iter()
-                               .filter(|b| b.block_hash == block_hash)
-                               .map(|b| b.bid_value)
-                               .fold(Decimal::ZERO, Decimal::max);
+                        let a_max = a
+                            .bids
+                            .iter()
+                            .filter(|b| b.block_hash == block_hash)
+                            .map(|b| b.bid_value)
+                            .fold(Decimal::ZERO, Decimal::max);
 
-                           let b_max = b.bids.iter()
-                               .filter(|b| b.block_hash == block_hash)
-                               .map(|b| b.bid_value)
-                               .fold(Decimal::ZERO, Decimal::max);
+                        let b_max = b
+                            .bids
+                            .iter()
+                            .filter(|b| b.block_hash == block_hash)
+                            .map(|b| b.bid_value)
+                            .fold(Decimal::ZERO, Decimal::max);
 
-                           b_max.cmp(&a_max).then_with(|| aid.cmp(bid))
-                       });
+                        b_max.cmp(&a_max).then_with(|| aid.cmp(bid))
+                    });
 
                     let (best_req_id, _) = matched_req_ids[0];
 
@@ -118,9 +132,36 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
                 }
             }
         }
+
         _ => {}
     }
 }
+impl CommitBoostSlotInfo {
+    pub fn merge_fields_from_log_entry(&mut self, log_entry: &CommitBoostLogEntry) {
+        if self.block_hash.is_empty() {
+            if let Some(bh) = &log_entry.fields.block_hash {
+                self.block_hash = bh.clone();
+            }
+        }
+
+        if self.block_number.is_empty() {
+            if let Some(num) = log_entry.span.block_number {
+                if num != 0 {
+                    self.block_number = num.to_string();
+                }
+            }
+        }
+
+        // Optional: can extend to merge more fields later if needed
+    }
+
+    pub fn from_log_entry(log_entry: &CommitBoostLogEntry, slot_uid: String, slot: String) -> Self {
+        let mut info = CommitBoostSlotInfo::new(slot_uid, slot);
+        info.merge_fields_from_log_entry(log_entry);
+        info
+    }
+}
+
 
 pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     let mut slots: Vec<_> = slot_infos.keys().cloned().collect();

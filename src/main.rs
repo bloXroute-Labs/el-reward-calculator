@@ -120,6 +120,7 @@ fn main() -> IoResult<()>  {
                for reader in readers {
                    commitboost_json::parse_file_content(reader, &mut slot_infos);
                }
+               commitboost_json::post_process_all_slots(&mut slot_infos);
                // Always select final infos once
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
