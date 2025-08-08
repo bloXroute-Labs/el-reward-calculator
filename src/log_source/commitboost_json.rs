@@ -77,10 +77,22 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
 
                 slot_info
                     .requests
-                    .entry(req_id)
+                    .entry(req_id.clone())
                     .or_insert_with(Default::default)
                     .bids
-                    .push(bid);
+                    .push(bid.clone());
+
+                // Handle resolution of earlier unmatched blinded block
+                if slot_info.selected_req_id.is_none()
+                    && slot_info.pending_blinded_block_hashes.contains(&bid.block_hash)
+                {
+                    debug!(
+                        "[RESOLVE] Found pending blinded block hash {} via header; setting selected_req_id={}",
+                        bid.block_hash, req_id
+                    );
+                    slot_info.selected_req_id = Some(req_id);
+                    slot_info.block_hash = bid.block_hash.clone();
+                }
             }
         }
 
@@ -126,9 +138,12 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
                     }
                 } else {
                     debug!(
-                        "[SUBMIT] No matching request for block_hash {} in slot_uid {}",
+                        "[DEFER] No matching request yet for blinded block {}; storing for later in slot_uid={}",
                         block_hash, slot_uid
                     );
+                    if !slot_info.pending_blinded_block_hashes.contains(&block_hash) {
+                        slot_info.pending_blinded_block_hashes.push(block_hash);
+                    }
                 }
             }
         }
@@ -136,6 +151,7 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
         _ => {}
     }
 }
+
 impl CommitBoostSlotInfo {
     pub fn merge_fields_from_log_entry(&mut self, log_entry: &CommitBoostLogEntry) {
         if self.block_hash.is_empty() {
@@ -174,9 +190,55 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
             for slot_uid in slot_uids {
                 if let Some(slot_info) = slot_info_map.get_mut(&slot_uid) {
+                    // Attempt to finalize missing match from pending blinded block hashes
+                    if slot_info.selected_req_id.is_none() && !slot_info.pending_blinded_block_hashes.is_empty() {
+                        for blinded_block_hash in &slot_info.pending_blinded_block_hashes {
+                            let mut matched: Vec<(&String, &CommitBoostRequest)> = slot_info
+                                .requests
+                                .iter()
+                                .filter(|(_, req)| req.bids.iter().any(|b| &b.block_hash == blinded_block_hash))
+                                .collect();
+
+                            if !matched.is_empty() {
+                                matched.sort_by(|(aid, a), (bid, b)| {
+                                    let a_max = a
+                                        .bids
+                                        .iter()
+                                        .filter(|b| &b.block_hash == blinded_block_hash)
+                                        .map(|b| b.bid_value)
+                                        .fold(Decimal::ZERO, Decimal::max);
+
+                                    let b_max = b
+                                        .bids
+                                        .iter()
+                                        .filter(|b| &b.block_hash == blinded_block_hash)
+                                        .map(|b| b.bid_value)
+                                        .fold(Decimal::ZERO, Decimal::max);
+
+                                    b_max.cmp(&a_max).then_with(|| aid.cmp(bid))
+                                });
+
+                                let (best_req_id, _) = matched[0];
+                                debug!(
+                                    "[FINALIZE] Late match for blinded block hash {} -> req_id {}",
+                                    blinded_block_hash, best_req_id
+                                );
+                                slot_info.selected_req_id = Some(best_req_id.clone());
+                                slot_info.block_hash = blinded_block_hash.clone();
+                                break;
+                            }
+                        }
+                    }
+
                     let selected_req_id = match &slot_info.selected_req_id {
                         Some(id) => id,
-                        None => continue,
+                        None => {
+                            debug!(
+                                "[SKIP] Slot {} (uid: {}) has no selected_req_id and no valid blinded match",
+                                slot_info.slot, slot_info.slot_uid
+                            );
+                            continue;
+                        }
                     };
 
                     let bidset = match slot_info.requests.get(selected_req_id) {
@@ -186,6 +248,10 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
                     let mut bids = bidset.bids.clone();
                     if bids.is_empty() {
+                        debug!(
+                            "[SKIP] No bids for selected_req_id {} in slot_uid {}",
+                            selected_req_id, slot_uid
+                        );
                         continue;
                     }
 
@@ -237,12 +303,18 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                                 slot_info.el_reward_increase_percentage = el_reward_percent_precise.round().to_u64().unwrap_or(0);
                             }
                         }
+                    } else {
+                        debug!(
+                            "[SKIP] No bid matched block_hash {} in slot_uid {}",
+                            slot_info.block_hash, slot_uid
+                        );
                     }
                 }
             }
         }
     }
 }
+
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
