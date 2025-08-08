@@ -12,6 +12,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
+use std::path::Path;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::{self, ErrorKind};
@@ -81,10 +82,21 @@ fn main() -> IoResult<()>  {
 
        let args: Vec<String> = env::args().collect();
        if args.len() < 3 {
-           eprint!("either filename or validator client id is missing");
+           eprintln!("Usage: <executable> <log_file_or_folder> <log_source_flag> [csv|json]");
            std::process::exit(1);
        }
-       let filename = &args[1];
+       let input_path = Path::new(&args[1]);
+       let readers = if input_path.is_dir() {
+           fs::read_dir(input_path)?
+               .filter_map(Result::ok)
+               .filter(|entry| entry.path().is_file())
+               .filter_map(|entry| File::open(entry.path()).ok().map(BufReader::new))
+               .collect::<Vec<_>>()
+       } else {
+           vec![BufReader::new(File::open(input_path)?)]
+       };
+
+
        let validator_client_id_flag = &args[2];
        let output_format = args.get(3).map(|s| s.as_str()).unwrap_or("json");
 
@@ -95,8 +107,6 @@ fn main() -> IoResult<()>  {
                std::process::exit(1);
            }
        };
-       let file = File::open(filename)?;
-       let reader = BufReader::new(file);
 
        let now = Utc::now();
        let date_str = Utc::now().format("%d_%m_%Y").to_string();
@@ -106,8 +116,10 @@ fn main() -> IoResult<()>  {
 
        match log_source {
            LogSource::CommitboostJson => {
-               let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
-               commitboost_json::parse_file_content(reader, &mut slot_infos);
+           let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
+               for reader in readers {
+                   commitboost_json::parse_file_content(reader, &mut slot_infos);
+               }
                // Always select final infos once
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
@@ -136,10 +148,12 @@ fn main() -> IoResult<()>  {
            }
            LogSource::CommitboostText => {
                let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
-               for line in reader.lines() {
-                   match line {
-                       Ok(line) => commitboost_text::process_lines(line, &mut slot_infos),
-                       Err(e) => eprintln!("failed to read lines: {}", e),
+               for reader in readers {
+                   for line in reader.lines() {
+                       match line {
+                           Ok(line) => commitboost_text::process_lines(line, &mut slot_infos),
+                           Err(e) => eprintln!("failed to read lines: {}", e),
+                       }
                    }
                }
                // Always select final infos once
@@ -171,7 +185,9 @@ fn main() -> IoResult<()>  {
 
            LogSource::MevboostJson => {
                let mut slot_infos: SlotInfos = HashMap::new();
-               mevboost_json::parse_file_content(reader, &mut slot_infos);
+               for reader in readers {
+                   mevboost_json::parse_file_content(reader, &mut slot_infos);
+               }
                // Always select final infos once
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
@@ -200,7 +216,9 @@ fn main() -> IoResult<()>  {
 
            LogSource::Vouch => {
                let mut slot_infos: SlotInfos = HashMap::new();
-               vouch::parse_file_content(reader, &mut slot_infos);
+               for reader in readers {
+                   vouch::parse_file_content(reader, &mut slot_infos);
+               }
                // Always select final infos once
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
                // after finalize_slot_infos(...)
@@ -229,10 +247,12 @@ fn main() -> IoResult<()>  {
            LogSource::MevboostText => {
                let mut slot_infos: SlotInfos = HashMap::new();
 
-               for line in reader.lines() {
-                   match line {
-                       Ok(line) => mevboost_text::process_lines_first_pass(line, &mut slot_infos),
-                       Err(e) => eprintln!("failed to read lines: {}", e),
+               for reader in readers {
+                   for line in reader.lines() {
+                       match line {
+                           Ok(line) => mevboost_text::process_lines_first_pass(line, &mut slot_infos),
+                           Err(e) => eprintln!("failed to read lines: {}", e),
+                       }
                    }
                }
 
