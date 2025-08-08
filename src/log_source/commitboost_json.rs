@@ -190,7 +190,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
             for slot_uid in slot_uids {
                 if let Some(slot_info) = slot_info_map.get_mut(&slot_uid) {
-                    // Attempt to finalize missing match from pending blinded block hashes
+                    // 1. Attempt late match using pending_blinded_block_hashes
                     if slot_info.selected_req_id.is_none() && !slot_info.pending_blinded_block_hashes.is_empty() {
                         for blinded_block_hash in &slot_info.pending_blinded_block_hashes {
                             let mut matched: Vec<(&String, &CommitBoostRequest)> = slot_info
@@ -230,11 +230,40 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                         }
                     }
 
+                    // 2. If still none, try best bid across all requests
+                    if slot_info.selected_req_id.is_none() {
+                        let mut best_bid: Option<(String, String, Decimal)> = None;
+
+                        for (req_id, req) in &slot_info.requests {
+                            for bid in &req.bids {
+                                if !bid.block_hash.is_empty() && bid.bid_value > Decimal::ZERO {
+                                    if let Some((_, _, current_max)) = &best_bid {
+                                        if bid.bid_value > *current_max {
+                                            best_bid = Some((req_id.clone(), bid.block_hash.clone(), bid.bid_value));
+                                        }
+                                    } else {
+                                        best_bid = Some((req_id.clone(), bid.block_hash.clone(), bid.bid_value));
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some((best_req_id, block_hash, _)) = best_bid {
+                            debug!(
+                                "[AUTO-MATCH] Selected best bid req_id={} block_hash={} (fallback)",
+                                best_req_id, block_hash
+                            );
+                            slot_info.selected_req_id = Some(best_req_id);
+                            slot_info.block_hash = block_hash;
+                        }
+                    }
+
+                    // Continue with reward calculation only if match found
                     let selected_req_id = match &slot_info.selected_req_id {
                         Some(id) => id,
                         None => {
                             debug!(
-                                "[SKIP] Slot {} (uid: {}) has no selected_req_id and no valid blinded match",
+                                "[SKIP] Slot {} (uid: {}) has no selected_req_id and no valid blinded/bid fallback match",
                                 slot_info.slot, slot_info.slot_uid
                             );
                             continue;
@@ -243,7 +272,13 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
                     let bidset = match slot_info.requests.get(selected_req_id) {
                         Some(b) => b,
-                        None => continue,
+                        None => {
+                            debug!(
+                                "[SKIP] selected_req_id {} not found in slot_uid {}",
+                                selected_req_id, slot_uid
+                            );
+                            continue;
+                        }
                     };
 
                     let mut bids = bidset.bids.clone();
@@ -285,7 +320,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                                 Url::parse(&bid.relay).ok().and_then(|url| url.host_str().map(String::from)).unwrap_or_default()
                             });
 
-                            if !slot_info.is_equal_to_proxy_bid && second_best_val > Decimal::ZERO {
+                            if second_best_val > Decimal::ZERO {
                                 let el_reward_increase = slot_info.onchain_bid_value - second_best_val;
                                 let wei_multiplier = Decimal::from(1_000_000_000_000_000_000u128);
                                 let el_reward_increase_wei_decimal = (el_reward_increase * wei_multiplier).round();
@@ -314,6 +349,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         }
     }
 }
+
 
 
 #[derive(Debug, Default, Serialize, Deserialize)]
