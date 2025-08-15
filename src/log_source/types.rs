@@ -169,6 +169,8 @@ pub struct SlotInfo {
     pub equal_to_proxy_bidders: String,
     pub is_equal_to_proxy_bid: bool,
     pub fee_per_block: Decimal,
+    #[serde(default)]
+    pub pending_blinded_block_hashes: Vec<String>,
 }
 
 pub fn u256_to_string<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
@@ -258,6 +260,7 @@ impl SlotInfo {
             equal_to_proxy_bidders:String::new(),
             is_equal_to_proxy_bid: false,
             fee_per_block: Decimal::ZERO,
+            pending_blinded_block_hashes: Vec::new(),
         }
     }
 
@@ -283,6 +286,7 @@ impl SlotInfo {
             equal_to_proxy_bidders:String::new(),
             is_equal_to_proxy_bid: false,
             fee_per_block: Decimal::ZERO ,
+            pending_blinded_block_hashes: Vec::new(),
         }
     }
 
