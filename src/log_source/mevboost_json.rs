@@ -118,6 +118,7 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                         "[AUTO-MATCH] No payload-set block_hash; falling back to best bid block_hash={} (slot_uid={})",
                         best_bid.block_hash, slot_uid
                     );
+                    // Assign now; we are NOT holding a reference to the field
                     slot_info.info.block_hash = best_bid.block_hash.clone();
                 } else {
                     debug!(
@@ -128,17 +129,16 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 }
             }
 
-            let winning_block_hash = &slot_info.info.block_hash;
-            debug!("[FINALIZE] slot: {}, slot_uid: {}, payload/winning block_hash: {}", slot, slot_uid, winning_block_hash);
+            // Clone to local to avoid borrowing the field across later assignments/closures
+            let mut winning_block_hash = slot_info.info.block_hash.clone();
+            debug!(
+                "[FINALIZE] slot: {}, slot_uid: {}, payload/winning block_hash: {}",
+                slot, slot_uid, winning_block_hash
+            );
 
             // 2) Try to find a bid that matches the chosen block hash.
-            let mut winner_index: Option<usize> = None;
-            for (i, bid) in slot_info.info.bids.iter().enumerate() {
-                if bid.block_hash == *winning_block_hash {
-                    winner_index = Some(i);
-                    break;
-                }
-            }
+            let mut winner_index: Option<usize> =
+                slot_info.info.bids.iter().position(|b| b.block_hash == winning_block_hash);
 
             // 3) If no bid matched the payload hash, fallback to the highest bid with a non-empty hash.
             if winner_index.is_none() {
@@ -148,7 +148,9 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                         "[AUTO-MATCH] No bid matched payload block_hash {}; falling back to best bid block_hash={} (slot_uid={})",
                         winning_block_hash, best_bid.block_hash, slot_uid
                     );
+                    // Update struct field and keep the local copy in sync
                     slot_info.info.block_hash = best_bid.block_hash.clone();
+                    winning_block_hash = best_bid.block_hash.clone();
                     winner_index = Some(best_bid_idx);
                 } else {
                     debug!(
@@ -198,8 +200,10 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
             slot_info.is_equal_to_proxy_bid = !relay_proxy_bidders.is_empty();
             slot_info.is_proxy_win = relay_proxy_won && !slot_info.is_equal_to_proxy_bid;
 
-            slot_info.is_winning_bid_highest = bid.block_hash == highest_bid.block_hash
-                || slot_info.info.bids.iter().any(|b| b.block_hash == *winning_block_hash && b.bid_value == highest_bid.bid_value);
+            // Use the local String here; no borrow of the struct field
+            slot_info.is_winning_bid_highest =
+                bid.block_hash == highest_bid.block_hash
+                || slot_info.info.bids.iter().any(|b| b.block_hash == winning_block_hash && b.bid_value == highest_bid.bid_value);
 
             if highest_bidders.len() > 1 && !relay_proxy_won {
                 debug!("[FINALIZE] Skipping EL reward calc: multiple highest bids and proxy did not win.");
