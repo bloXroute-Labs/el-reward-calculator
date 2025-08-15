@@ -5,7 +5,7 @@ use log::debug;
 use ethers::types::U256;
 use serde::Serialize;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::fs::{self, File};
 use std::io::{Write, Result as IoResult};
@@ -162,7 +162,7 @@ where
     final_selected
 }
 
-/// NEW: Collapse any flat map keyed by slot_uid into one record per *slot*.
+/// Collapse any flat map keyed by slot_uid into one record per *slot*.
 /// Same policy as above: prefer proxy win with max uplift, tie by uid.
 pub fn coalesce_by_slot_generic<T>(
     selected_infos: &HashMap<String, T>,
@@ -272,7 +272,10 @@ where
 }
 
 /// Writes the summary and logs skipped infos to JSON.
-/// **Fix:** collapse to *one* record per slot before computing totals.
+/// Now prints:
+/// - Total slots parsed : <union(per-slot, skipped)>
+/// - Skipped slot : <count> (refer skipped slots file for reason)
+/// - Total slots considered for calculation : <per-slot count>
 pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     selected_infos: &HashMap<String, T>,
     folder_path: &str,
@@ -283,13 +286,28 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
 ) -> std::io::Result<()> {
     use std::io::Write;
 
-    // Collapse to one record per slot (handles MEV-Boost JSON case where input is slot_uid keyed)
+    // Collapse to one record per slot (handles MEV-Boost JSON and mevboost_text when slot_uid keyed)
     let per_slot = coalesce_by_slot_generic(selected_infos);
 
-    // For visibility: show both counts
-    let total_slot_uids = selected_infos.len();
-    let total_slots = per_slot.len();
+    // Build sets for counts
+    let per_slot_set: HashSet<String> = per_slot.values().map(|i| i.get_slot().to_string()).collect();
+    let skipped_slot_set: HashSet<String> = skipped_infos.keys().cloned().collect();
 
+    // Union for "Total slots parsed"
+    let mut union_slots = per_slot_set.clone();
+    union_slots.extend(skipped_slot_set.iter().cloned());
+    let total_slots_parsed = union_slots.len();
+
+    // Skipped slots only (avoid accidental double counting if data overlaps)
+    let skipped_slots_count = skipped_slot_set.difference(&per_slot_set).count();
+
+    // Considered for calc == per-slot count
+    let total_slots_considered = per_slot.len();
+
+    // For visibility (legacy)
+    let total_slot_uids = selected_infos.len();
+
+    // Metrics
     let mut slots_won_by_rproxy = 0usize;
     let mut total_eth_overall = Decimal::ZERO;
     let mut total_eth_rproxy = Decimal::ZERO;
@@ -302,7 +320,6 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     // Stable sort by uid (or change to .get_slot() if you prefer)
     sorted_infos.sort_by(|a, b| a.get_uid().cmp(&b.get_uid()));
 
-    // Checksum across the selected per-slot entries
     let checksum: Decimal = sorted_infos.iter().map(|i| i.get_onchain_bid_value()).sum();
     println!("Total ETH Checksum: {:.18}", checksum);
 
@@ -330,9 +347,16 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     let summary_path = format!("{}/summary_{}_{}.txt", folder_path, date_str, time_str);
     let mut file = File::create(&summary_path)?;
 
-    // Summary (prints both counts; metrics are per-slot)
-    writeln!(file, "Total Slot UIDs        : {}", total_slot_uids)?;
-    writeln!(file, "Total Slots            : {}", total_slots)?;
+    // New header lines
+    writeln!(file, "--------------------------------------------------------")?;
+    writeln!(file, "Total slots parsed : {}", total_slots_parsed)?;
+    writeln!(file, "Total Slot UIDs(single slot contain multiple UIDs): {}", total_slot_uids)?;
+    writeln!(file, "Skipped slot : {} (refer skipped slots file for reason)", skipped_slots_count)?;
+    writeln!(file, "")?;
+
+    writeln!(file, "--------------------------------------------------------")?;
+    // Legacy/debug lines (kept)
+    writeln!(file, "Total Slots(considered for calculation)            : {}", total_slots_considered)?;
     writeln!(file, "total eth overall      : {:.18} ETH", total_eth_overall)?;
     writeln!(file, "Slots won by Rproxy    : {}", slots_won_by_rproxy)?;
     writeln!(file, "total eth (Rproxy slots): {:.18} ETH", total_eth_rproxy)?;
@@ -346,9 +370,16 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     )?;
     writeln!(file, "50% Owed to BLXR       : {:.18} ETH", owed_to_blxr)?;
     writeln!(file, "Total fee per block    : {:.18} ETH", total_fee_per_block_eth)?;
+    writeln!(file, "--------------------------------------------------------")?;
 
-    println!("Total Slot UIDs           : {}", total_slot_uids);
-    println!("Total Slots               : {}", total_slots);
+    // Mirror to stdout
+    println!("-----------------------------------------------------------");
+    println!("Total slots parsed : {}", total_slots_parsed);
+    println!("Total Slot UIDs(single slot contain multiple UIDs): {}", total_slot_uids);
+    println!("Skipped slots : {} (refer skipped slots file for reason)", skipped_slots_count);
+    println!("-----------------------------------------------------------");
+
+    println!("Total Slots(considered for calculation): {}", total_slots_considered);
     println!("total eth overall         : {:.18} ETH", total_eth_overall);
     println!("Slots won by Rproxy       : {}", slots_won_by_rproxy);
     println!("total eth (Rproxy slots)  : {:.18} ETH", total_eth_rproxy);
@@ -359,7 +390,8 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     );
     println!("50% Owed to BLXR         : {:.18} ETH", owed_to_blxr);
     println!("Total fee per block       : {:.18} ETH", total_fee_per_block_eth);
-
+    println!("-----------------------------------------------------------");
+    //
     // Skipped infos
     let skipped_dir = format!("{}/skipped", folder_path);
     fs::create_dir_all(&skipped_dir)?;
