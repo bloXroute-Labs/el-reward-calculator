@@ -12,6 +12,15 @@ use std::io::{Write, Result as IoResult};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde_json::{self, to_string_pretty};
+use chrono::Local; // <-- local time
+
+/// Local timestamp helper
+fn local_stamp() -> (String, String) {
+    let now = Local::now();
+    let date_str = now.format("%Y-%m-%d").to_string(); // e.g. 2025-08-15
+    let time_str = now.format("%Hh_%Mm_%Ss").to_string();   // e.g. 17h_25m_05s
+    (date_str, time_str)
+}
 
 /// Common stats surface for both MEV-Boost and Commit-Boost slot info
 pub trait RewardStats: Clone {
@@ -202,13 +211,14 @@ where
     per_slot
 }
 
-/// CSV writer (as-is): writes whatever map you pass (slot or slot_uid keyed)
+/// CSV writer (now uses local time for filename)
 pub fn write_csv_generic<T: RewardStats>(
     slot_infos: &HashMap<String, T>,
     folder_path: &str,
-    date_str: &str,
-    time_str: &str,
+    _date_str: &str, // ignored
+    _time_str: &str, // ignored
 ) -> IoResult<()> {
+    let (date_str, time_str) = local_stamp();
     let file_path = format!("{}/slot_infos_{}_{}.csv", folder_path, date_str, time_str);
     let file = File::create(&file_path)?;
     let mut wtr = WriterBuilder::new().has_headers(true).from_writer(file);
@@ -243,27 +253,28 @@ pub fn write_csv_generic<T: RewardStats>(
     Ok(())
 }
 
-/// OPTIONAL: CSV writer that guarantees one row per *slot*
+/// OPTIONAL: CSV writer that guarantees one row per *slot* (uses local time)
 pub fn write_csv_per_slot_generic<T: RewardStats + Clone + Debug>(
     selected_infos: &HashMap<String, T>,
     folder_path: &str,
-    date_str: &str,
-    time_str: &str,
+    _date_str: &str, // ignored
+    _time_str: &str, // ignored
 ) -> IoResult<()> {
     let per_slot = coalesce_by_slot_generic(selected_infos);
-    write_csv_generic(&per_slot, folder_path, date_str, time_str)
+    write_csv_generic(&per_slot, folder_path, "", "")
 }
 
 pub fn write_json_generic<K, T>(
     slot_infos: &HashMap<K, T>,
     folder_path: &str,
-    date_str: &str,
-    time_str: &str,
+    _date_str: &str, // ignored
+    _time_str: &str, // ignored
 ) -> IoResult<()>
 where
     K: std::fmt::Display + Eq + std::hash::Hash + Serialize,
     T: Serialize,
 {
+    let (date_str, time_str) = local_stamp();
     let file_path = format!("{}/slot_infos_{}_{}.json", folder_path, date_str, time_str);
     let mut file = File::create(&file_path)?;
     let json_data = serde_json::to_string_pretty(&slot_infos)?;
@@ -272,19 +283,19 @@ where
 }
 
 /// Writes the summary and logs skipped infos to JSON.
-/// Now prints:
-/// - Total slots parsed : <union(per-slot, skipped)>
-/// - Skipped slot : <count> (refer skipped slots file for reason)
-/// - Total slots considered for calculation : <per-slot count>
+/// Now prints and writes filenames using **local time**.
 pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     selected_infos: &HashMap<String, T>,
     folder_path: &str,
-    date_str: &str,
-    time_str: &str,
+    _date_str: &str, // ignored
+    _time_str: &str, // ignored
     _all_infos: &[T],
     skipped_infos:  &HashMap<String, Vec<(String, T, Vec<&'static str>)>>,
 ) -> std::io::Result<()> {
     use std::io::Write;
+
+    // Local time stamp
+    let (date_str, time_str) = local_stamp();
 
     // Collapse to one record per slot (handles MEV-Boost JSON and mevboost_text when slot_uid keyed)
     let per_slot = coalesce_by_slot_generic(selected_infos);
@@ -391,7 +402,7 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     println!("50% Owed to BLXR         : {:.18} ETH", owed_to_blxr);
     println!("Total fee per block       : {:.18} ETH", total_fee_per_block_eth);
     println!("-----------------------------------------------------------");
-    //
+
     // Skipped infos
     let skipped_dir = format!("{}/skipped", folder_path);
     fs::create_dir_all(&skipped_dir)?;
