@@ -2,14 +2,19 @@ use crate::log_source::types::{Bid, LogEntry};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use crate::{SlotInfo, SlotInfos};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime};
 use url::Url;
+ use crate::Utc;
 use ethers::types::U256;
 use crate::log_source::common::is_relay_proxy;
 use serde_json::{self, Deserializer, Value};
 use rust_decimal_macros::dec;
-use std::collections::{HashMap, BTreeSet};
+use std::collections::{ BTreeSet};
 use log::debug;
+use std::collections::{HashMap};
+use std::fs::{self, File};
+use std::io::{Result as IoResult, Write};
+use crate::mevboost_json::serde_json::to_writer_pretty;
 
 pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfos) {
     let stream = Deserializer::from_reader(reader).into_iter::<Value>();
@@ -382,21 +387,27 @@ impl SlotInfo {
     }
 }
 
-pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) {
+
+/// Remove all slot_uids that have no relay-proxy bids, return them as a map, and write them to JSON.
+///
+/// - `slot_infos` is modified in place (entries without proxy bids are removed).
+/// - Returns a `SlotInfos` containing only the removed entries (grouped by slot).
+/// - Also writes the removed map to `removed_json_path` as pretty JSON.
+///
+pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) -> IoResult<SlotInfos> {
     let mut total_slot_count = slot_infos.len();
     let mut slots_checked = 0;
     let mut slots_removed = 0;
     let mut slot_uids_removed = 0;
+
+    // Collect (slot, slot_uid) pairs to remove in a first pass
     let mut slots_to_remove: Vec<(String, String)> = Vec::new();
 
     for (slot, slot_map) in slot_infos.iter() {
         slots_checked += 1;
         for (slot_uid, slot_info) in slot_map.iter() {
-            let has_proxy_bid = slot_info
-                .info
-                .bids
-                .iter()
-                .any(|bid| is_relay_proxy(&bid.relay));
+            let has_proxy_bid = slot_info.info.bids.iter().any(|bid| is_relay_proxy(&bid.relay));
+
             if !has_proxy_bid {
                 println!(
                     "[Cleanup] No relay-proxy bid found for slot_uid '{}', slot '{}'. Marking for removal.",
@@ -412,13 +423,22 @@ pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) {
         }
     }
 
+    // This will hold everything we removed, grouped by slot
+    let mut removed: SlotInfos = HashMap::new();
+
+    // Second pass: actually remove and move into `removed`
     for (slot, slot_uid) in &slots_to_remove {
         if let Some(slot_map) = slot_infos.get_mut(slot) {
-            if slot_map.remove(slot_uid).is_some() {
+            if let Some(removed_info) = slot_map.remove(slot_uid) {
                 println!(
                     "[Cleanup] Removed slot_uid '{}' from slot '{}'",
                     slot_uid, slot
                 );
+                removed
+                    .entry(slot.clone())
+                    .or_insert_with(HashMap::new)
+                    .insert(slot_uid.clone(), removed_info);
+
                 slot_uids_removed += 1;
             }
 
@@ -439,4 +459,40 @@ pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) {
         "[Cleanup Summary] Checked {} slots, removed {} slot_uids from {} slots. Remaining slots: {}.",
         slots_checked, slot_uids_removed, slots_removed, total_slot_count
     );
+
+    // ----- Write outputs under the same dated folder as stats writer -----
+    let now = Utc::now();
+    let date_str = now.format("%d_%m_%Y").to_string();
+    let time_str = now.format("%H_%M_%S").to_string();
+
+    // Ensure folder: slot_infos/<date>/
+    let dir_path = format!("slot_infos/{}/", date_str);
+    fs::create_dir_all(&dir_path)?;
+
+    // Proper FILE paths (no trailing slash after .json/.txt)
+    let json_path = format!("{}nonproxy_slots_{}_{}.json", dir_path, date_str, time_str);
+    let summary_path = format!("{}nonproxy_slots_summary_{}_{}.txt", dir_path, date_str, time_str);
+
+    // JSON dump
+    let file = File::create(&json_path)?;
+    to_writer_pretty(file, &removed)?;
+    println!("[Cleanup] Wrote removed no-proxy entries to '{}'", json_path);
+
+    // Small summary
+    let removed_slots_count = removed.len();
+    let removed_slot_uids_count: usize = removed.values().map(|m| m.len()).sum();
+
+    let mut sfile = File::create(&summary_path)?;
+    writeln!(sfile, "Removed (no relay-proxy bids) summary")?;
+    writeln!(sfile, "-----------------------------------")?;
+    writeln!(sfile, "Slots checked            : {}", slots_checked)?;
+    writeln!(sfile, "Slots before cleanup     : {}", total_slot_count + slots_removed)?;
+    writeln!(sfile, "Slots removed            : {}", slots_removed)?;
+    writeln!(sfile, "Slot UIDs removed        : {}", removed_slot_uids_count)?;
+    writeln!(sfile, "Distinct slots removed   : {}", removed_slots_count)?;
+    writeln!(sfile, "Remaining slots          : {}", total_slot_count)?;
+    println!("[Cleanup] Wrote removed summary to '{}'", summary_path);
+
+    Ok(removed)
+
 }
