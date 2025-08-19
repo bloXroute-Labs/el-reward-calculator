@@ -47,7 +47,7 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfo
             }
         }
     }
-    cleanup_slots_without_proxy(slot_infos);
+   let _ =  cleanup_slots_without_proxy(slot_infos);
     finalize_slot_infos(slot_infos)
 }
 

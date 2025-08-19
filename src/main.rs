@@ -157,6 +157,7 @@ fn main() -> IoResult<()>  {
                        }
                    }
                }
+               commitboost_text::post_process_all_slots(&mut slot_infos);
                // Always select final infos once
                let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 

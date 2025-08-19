@@ -186,6 +186,8 @@ pub struct RequestInfo {
     pub bids: Vec<Bid>,
     pub payload_start_ms_into_slot: i64,
     pub block_hash: String,
+    // NEW: payload flag per request (per-UID)
+    pub is_payload_received: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd, Clone)]

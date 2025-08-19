@@ -1,24 +1,23 @@
 use csv::WriterBuilder;
 use crate::SlotInfo;
 use crate::log_source::types::{CommitBoostSlotInfo, SlotInfoWithoutBids};
-use log::debug;
 use ethers::types::U256;
 use serde::Serialize;
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap};
 use std::fmt::Debug;
 use std::fs::{self, File};
 use std::io::{Write, Result as IoResult};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde_json::{self, to_string_pretty};
-use chrono::Local; // <-- local time
+use chrono::Local; // local time for filenames
 
 /// Local timestamp helper
 fn local_stamp() -> (String, String) {
     let now = Local::now();
     let date_str = now.format("%Y-%m-%d").to_string(); // e.g. 2025-08-15
-    let time_str = now.format("%Hh_%Mm_%Ss").to_string();   // e.g. 17h_25m_05s
+    let time_str = now.format("%Hh_%Mm_%Ss").to_string(); // e.g. 17h_25m_05s
     (date_str, time_str)
 }
 
@@ -92,87 +91,85 @@ impl RewardStats for CommitBoostSlotInfo {
     fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
 }
 
-/// From a map of {slot -> {slot_uid -> T}}, select the *one* T per slot to keep.
-/// Policy: prefer proxy wins with positive uplift; among ties, pick max uplift; tie-break by uid.
+/// Select exactly one UID per slot deterministically:
+/// 1) prefer proxy win with positive uplift,
+/// 2) prefer higher uplift,
+/// 3) tie-break by (block_hash, slot_uid) lexicographically.
 pub fn select_final_slot_infos_generic<T>(
     slot_infos: &HashMap<String, HashMap<String, T>>,
 ) -> HashMap<String, T>
 where
-    T: RewardStats + Clone + Debug,
+    T: RewardStats + Clone + std::fmt::Debug,
 {
     let mut final_selected: HashMap<String, T> = HashMap::new();
 
-    for (slot, slot_info_with_uid) in slot_infos {
-        let proxy_wins: Vec<_> = slot_info_with_uid
-            .values()
-            .filter(|si| {
-                let value = si.get_el_reward_eth();
-                let valid = si.get_is_proxy_win() && value > Decimal::ZERO;
-                if si.get_is_proxy_win() {
-                    debug!(
-                        "[SELECT] slot_uid={} is_proxy_win=true el_reward_increase_eth={} valid={}",
-                        si.get_uid(),
-                        si.get_el_reward_eth(),
-                        valid
-                    );
-                }
-                valid
-            })
-            .collect();
+    for (slot, uid_map) in slot_infos {
+        let mut candidates: Vec<&T> = uid_map.values().collect();
 
-        let chosen = if !proxy_wins.is_empty() {
-            let selected = proxy_wins
-                .into_iter()
-                .max_by(|a, b| {
-                    let cmp = a
-                        .get_el_reward_eth()
-                        .partial_cmp(&b.get_el_reward_eth())
-                        .unwrap_or(Ordering::Equal);
-                    if cmp == Ordering::Equal {
-                        debug!(
-                            "[TIE] Equal el_reward_increase_eth: {} == {}, tie-breaking with slot_uid",
-                            a.get_el_reward_eth(),
-                            b.get_el_reward_eth()
-                        );
-                        a.get_uid().cmp(b.get_uid())
-                    } else {
-                        cmp
-                    }
-                })
-                .unwrap();
-
-            debug!(
-                "[CHOSEN] Selected proxy win slot_uid={}, el_reward_increase_eth={}, is_equal_to_proxy_bid={}",
-                selected.get_uid(),
-                selected.get_el_reward_eth(),
-                false // expose via trait if needed
-            );
-
-            Some(selected)
-        } else {
-            let fallback = slot_info_with_uid.values().next();
-            if let Some(f) = fallback {
-                debug!(
-                    "[CHOSEN] No proxy win, defaulting to first slot_uid={} with block_hash={}",
-                    f.get_uid(),
-                    f.get_block_hash()
-                );
-            } else {
-                debug!("[CHOSEN] No slot_info entries found at all.");
+        candidates.sort_by(|a, b| {
+            // (1) proxy win + positive uplift
+            let a_pref = a.get_is_proxy_win() && a.get_el_reward_eth() > Decimal::ZERO;
+            let b_pref = b.get_is_proxy_win() && b.get_el_reward_eth() > Decimal::ZERO;
+            if a_pref != b_pref {
+                return if a_pref { Ordering::Less } else { Ordering::Greater };
             }
-            fallback
-        };
 
-        if let Some(slot_info) = chosen {
-            final_selected.insert(slot.clone(), slot_info.clone());
+            // (2) higher uplift first
+            match b.get_el_reward_eth()
+                .partial_cmp(&a.get_el_reward_eth())
+                .unwrap_or(Ordering::Equal)
+            {
+                Ordering::Less    => return Ordering::Less,    // a first
+                Ordering::Greater => return Ordering::Greater, // b first
+                Ordering::Equal   => {}
+            }
+
+            // (3) stable lexicographic tie-breaks
+            let ord = a.get_block_hash().cmp(b.get_block_hash());
+            if ord != Ordering::Equal { return ord; }
+
+            a.get_uid().cmp(b.get_uid())
+        });
+
+        if let Some(best) = candidates.first() {
+            final_selected.insert(slot.clone(), (*best).clone());
         }
     }
 
     final_selected
 }
 
+/// Sum `onchain_bid_value` once per slot (diagnostic; not used for totals).
+/// If different UIDs under the same slot report different values, warn.
+pub fn sum_onchain_eth_per_slot<T: RewardStats>(
+    by_uid: &HashMap<String, T>,
+) -> Decimal {
+    let mut per_slot: HashMap<String, Decimal> = HashMap::new();
+
+    for info in by_uid.values() {
+        let slot_key = info.get_slot().to_string();
+        let val = info.get_onchain_bid_value();
+
+        match per_slot.get(&slot_key) {
+            Some(prev) => {
+                if *prev != val {
+                    log::warn!(
+                        "onchain_bid_value mismatch for slot {}: prev={} vs new={}",
+                        slot_key, prev, val
+                    );
+                }
+            }
+            None => {
+                per_slot.insert(slot_key, val);
+            }
+        }
+    }
+
+    per_slot.values().copied().sum()
+}
+
 /// Collapse any flat map keyed by slot_uid into one record per *slot*.
-/// Same policy as above: prefer proxy win with max uplift, tie by uid.
+/// Same policy as selection: prefer proxy win with max uplift, tie by (uid).
 pub fn coalesce_by_slot_generic<T>(
     selected_infos: &HashMap<String, T>,
 ) -> HashMap<String, T>
@@ -195,7 +192,15 @@ where
                     (true, false) => false,
                     (true, true) => match info.get_el_reward_eth().partial_cmp(&existing.get_el_reward_eth()).unwrap_or(Ordering::Equal) {
                         Ordering::Greater => true,
-                        Ordering::Equal => info.get_uid() < existing.get_uid(),
+                        Ordering::Equal => {
+                            // add stable tie-break on block_hash too if you want:
+                            let h = info.get_block_hash().cmp(existing.get_block_hash());
+                            if h != Ordering::Equal {
+                                h == Ordering::Less
+                            } else {
+                                info.get_uid() < existing.get_uid()
+                            }
+                        }
                         Ordering::Less => false,
                     },
                     (false, false) => false,
@@ -211,7 +216,7 @@ where
     per_slot
 }
 
-/// CSV writer (now uses local time for filename)
+/// CSV writer (uses local time for filename)
 pub fn write_csv_generic<T: RewardStats>(
     slot_infos: &HashMap<String, T>,
     folder_path: &str,
@@ -283,7 +288,7 @@ where
 }
 
 /// Writes the summary and logs skipped infos to JSON.
-/// Now prints and writes filenames using **local time**.
+/// Uses a **per-slot** view for stable totals.
 pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     selected_infos: &HashMap<String, T>,
     folder_path: &str,
@@ -297,12 +302,14 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     // Local time stamp
     let (date_str, time_str) = local_stamp();
 
-    // Collapse to one record per slot (handles MEV-Boost JSON and mevboost_text when slot_uid keyed)
+    // Per-slot collapse (deterministic)
     let per_slot = coalesce_by_slot_generic(selected_infos);
 
     // Build sets for counts
-    let per_slot_set: HashSet<String> = per_slot.values().map(|i| i.get_slot().to_string()).collect();
-    let skipped_slot_set: HashSet<String> = skipped_infos.keys().cloned().collect();
+    let per_slot_set: std::collections::HashSet<String> =
+        per_slot.values().map(|i| i.get_slot().to_string()).collect();
+    let skipped_slot_set: std::collections::HashSet<String> =
+        skipped_infos.keys().cloned().collect();
 
     // Union for "Total slots parsed"
     let mut union_slots = per_slot_set.clone();
@@ -318,27 +325,27 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     // For visibility (legacy)
     let total_slot_uids = selected_infos.len();
 
-    // Metrics
+    // === Metrics ===
+    // Stable totals: compute from the per-slot view
+    let total_eth_overall: Decimal = per_slot.values().map(|i| i.get_onchain_bid_value()).sum();
+
     let mut slots_won_by_rproxy = 0usize;
-    let mut total_eth_overall = Decimal::ZERO;
     let mut total_eth_rproxy = Decimal::ZERO;
     let mut reward_improvement_eth = Decimal::ZERO;
     let mut total_fee_per_block_eth = Decimal::ZERO;
 
     println!("Total slot_infos parsed_before (slot_uids): {}", total_slot_uids);
 
+    // Deterministic ordering for aggregation display
     let mut sorted_infos: Vec<_> = per_slot.values().collect();
-    // Stable sort by uid (or change to .get_slot() if you prefer)
     sorted_infos.sort_by(|a, b| a.get_uid().cmp(&b.get_uid()));
 
-    let checksum: Decimal = sorted_infos.iter().map(|i| i.get_onchain_bid_value()).sum();
-    println!("Total ETH Checksum: {:.18}", checksum);
+    // Per-slot checksum (should equal total_eth_overall)
+    let checksum_per_slot: Decimal = sorted_infos.iter().map(|i| i.get_onchain_bid_value()).sum();
+    println!("Total ETH Checksum (per-slot): {:.18}", checksum_per_slot);
 
+    // Aggregate from per-slot representatives
     for info in sorted_infos {
-        if info.get_onchain_bid_value() > Decimal::ZERO {
-            total_eth_overall += info.get_onchain_bid_value();
-        }
-
         if info.get_is_proxy_win() {
             slots_won_by_rproxy += 1;
             total_eth_rproxy += info.get_onchain_bid_value();
@@ -366,7 +373,6 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     writeln!(file, "")?;
 
     writeln!(file, "--------------------------------------------------------")?;
-    // Legacy/debug lines (kept)
     writeln!(file, "Total Slots(considered for calculation)            : {}", total_slots_considered)?;
     writeln!(file, "total eth overall      : {:.18} ETH", total_eth_overall)?;
     writeln!(file, "Slots won by Rproxy    : {}", slots_won_by_rproxy)?;
