@@ -1,14 +1,3 @@
-//! commitboost_text.rs — Parse Commit-Boost **text logs** (systemd/syslog style) and
-//! populate CommitBoostSlotInfos using the same selection logic as the JSON parser.
-//
-//! Examples supported:
-//! Jun 10 04:43:01 commit-boost-pbs[1355148]: 2025-06-10T04:43:01.958430Z  INFO : received unblinded block method=/eth/v1/builder/blinded_blocks req_id=... slot=11892213 block_hash=0xd72a... block_number=22671851 parent_hash=0x3b22...
-//! Jun 10 00:20:59 host commit-boost-pbs[1645437]: 2025-06-10T00:20:59.382215Z DEBUG : received new header relay_id="renzo_primev_bloxroute_regulated" latency=282.03516ms version="electra" value_eth="0.033989248002005575" block_hash=0x7c9a... method=/eth/v1/builder/header/{slot}/{parent_hash}/{pubkey} req_id=97cc... slot=11890903 parent_hash=0x63e5... validator=0xb3f9...
-//
-//! Add in Cargo.toml:
-//! regex = "1"
-//! once_cell = "1"
-
 use crate::CommitBoostSlotInfos;
 use crate::log_source::common::is_relay_proxy;
 use crate::log_source::types::{Bid, CommitBoostRequest, CommitBoostSlotInfo, SlotTrait};
@@ -22,7 +11,6 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
-use std::io::{BufRead, BufReader};
 use url::Url;
 
 // Compile once, reuse everywhere
@@ -32,14 +20,11 @@ static KV_START_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?:^|\s)[A-Za-z_][A-Za-z0-9_]*=").expect("valid kv-start regex"));
 
 
-/// Public entrypoint used by `main.rs`: process **a single line** (matches your call site).
 pub fn process_lines<S: AsRef<str>>(line: S, slot_infos: &mut CommitBoostSlotInfos) {
     if let Some(entry) = parse_text_line(line.as_ref()) {
         process_json(&entry, slot_infos);
     }
 }
-
-// ========================== Text line -> CommitBoostLogEntry ==========================
 
 fn parse_text_line(line: &str) -> Option<CommitBoostLogEntry> {
     // 0) Find embedded RFC3339 timestamp (ignore syslog prefix before it)
@@ -91,7 +76,6 @@ fn parse_text_line(line: &str) -> Option<CommitBoostLogEntry> {
     })
 }
 
-/// Split a string at the first ASCII whitespace boundary, returning (head, tail).
 fn split_once_ws(s: &str) -> Option<(&str, &str)> {
     let mut it = s.char_indices();
     while let Some((i, ch)) = it.next() {
@@ -110,9 +94,6 @@ fn split_once_ws(s: &str) -> Option<(&str, &str)> {
     None
 }
 
-/// Parse key/value pairs from a tail like:
-/// `relay_id="renzo..." latency=282.0ms method=/eth/v1/... block_hash=0x...`
-/// Supports quoted values with spaces; basic `\"` unescape.
 fn parse_kv_pairs(s: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let b = s.as_bytes();
@@ -196,7 +177,6 @@ fn parse_kv_pairs(s: &str) -> HashMap<String, String> {
     map
 }
 
-// ========================== Core processing (mirrors JSON version) ==========================
 
 fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlotInfos) {
     let span = &log_entry.span;
@@ -206,7 +186,7 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
 
     let slot_info_map = slot_infos.entry(slot.clone()).or_insert_with(HashMap::new);
 
-    // Ensure merging happens if slot_uid already exists
+    // merging happens if slot_uid already exists
     let slot_info = slot_info_map
         .entry(slot_uid.clone())
         .and_modify(|existing| merge_fields_into_slotinfo(existing, log_entry))
@@ -319,7 +299,6 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
     }
 }
 
-// ===== Free helper functions (avoid duplicate inherent impls) =====
 
 fn merge_fields_into_slotinfo(info: &mut CommitBoostSlotInfo, log_entry: &CommitBoostLogEntry) {
     if info.block_hash.is_empty() {
@@ -347,7 +326,6 @@ fn new_slot_info_from_log_entry(
     info
 }
 
-// ========================== Per-slot reconciliation (same rules as JSON) ==========================
 
 fn host_from(relay: &str) -> String {
     Url::parse(relay)
@@ -356,8 +334,7 @@ fn host_from(relay: &str) -> String {
         .unwrap_or_else(|| relay.to_string())
 }
 
-/// If you call the JSON version elsewhere, you can omit this and reuse that.
-/// Keeping a local copy is fine because it's in a different module namespace.
+
 pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     // ---------- Pass 1: resolve each UID as you already do (late match + best fallback) ----------
     let mut slots: Vec<_> = slot_infos.keys().cloned().collect();
@@ -448,7 +425,6 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         }
     }
 
-    // ---------- Pass 2: per-slot reconciliation with your rules ----------
     for slot in slots {
         let Some(slot_map) = slot_infos.get_mut(&slot) else { continue; };
 
@@ -497,13 +473,11 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
             continue;
         }
 
-        // Slot-top value
         let slot_top_value = all_bids
             .iter()
             .map(|v| v.value)
             .fold(Decimal::ZERO, Decimal::max);
 
-        // Partition by value
         let mut rproxy_at_top: Vec<&BidView> = Vec::new();
         let mut nonproxy_at_top_hosts: BTreeSet<String> = BTreeSet::new();
         for v in &all_bids {
@@ -642,7 +616,6 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     }
 }
 
-// ========================== Local types (module-private) ==========================
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
