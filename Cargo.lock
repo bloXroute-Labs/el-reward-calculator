@@ -783,6 +783,7 @@ dependencies = [
  "ethers",
  "lazy_static",
  "log",
+ "once_cell",
  "regex",
  "rust_decimal",
  "rust_decimal_macros",
