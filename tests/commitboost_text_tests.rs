@@ -23,7 +23,7 @@ fn info_ref<'a>(infos: &'a CommitBoostSlotInfos, slot: &str, parent_hash: &str) 
     m.get(&uid).expect("slot_uid present")
 }
 
-// ---------- Sample constants (mirroring your real data) ----------
+//  constants
 
 const SLOT: &str = "11955232";
 const PARENT: &str = "0x86ae50ba15ba533f4fbc080594b5d2aaa80a6539d9ac2fc5d0e8a283f047d554";
@@ -49,7 +49,6 @@ const PROXY_2: &str    = "renzo_bloxroute_proxy2";
 const V_NONPROXY: Decimal = dec!(0.016659245102584224);
 const V_PROXY: Decimal    = dec!(0.018038197956769141);
 
-// Build systemd+RFC3339 prefix, then attach the structured tail.
 fn sys_prefix(ts: &str) -> String {
     format!("Jun 18 22:46:48 commit-boost-pbs[1234]: {ts} ")
 }
@@ -82,12 +81,10 @@ fn unblinded_block_line(ts: &str, block_hash: &str, block_number: u64, req_id: &
 fn ignores_lines_without_rfc3339_and_parses_quoted_kv() {
     let mut infos: CommitBoostSlotInfos = Default::default();
 
-    // No RFC3339 -> ignored
     let bad = "Jun 18 22:46:48 commit-boost-pbs[1]: DEBUG : received new header relay_id=\"x\"";
     feed(bad, &mut infos);
     assert!(infos.is_empty(), "lines without RFC3339 timestamp must be ignored");
 
-    // Quoted value fields should parse and create a slot entry
     let line = format!(
         "{}DEBUG : received new header relay_id=\"renzo primev\" value_eth=\"0.1\" block_hash=0xabc method=/eth/v1/builder/header/{{slot}}/{{parent_hash}}/{{pubkey}} req_id=R slot={} parent_hash={}",
         sys_prefix(TS1), SLOT, PARENT
