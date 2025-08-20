@@ -3,6 +3,11 @@ name = "el-reward-calculator"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "el_reward_calculator"
+path = "src/lib.rs"
+
+
 [dependencies]
 regex = "1.11.0"
 lazy_static = "1.4.0"
