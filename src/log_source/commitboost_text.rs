@@ -1,6 +1,6 @@
 use crate::CommitBoostSlotInfos;
 use crate::log_source::common::is_relay_proxy;
-use crate::log_source::types::{Bid, CommitBoostRequest, CommitBoostSlotInfo, SlotTrait};
+use crate::log_source::types::{Bid, CommitBoostRequest, CommitBoostSlotInfo};
 use chrono::{DateTime, Utc};
 use ethers::types::U256;
 use log::debug;
@@ -187,10 +187,10 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
     // merging happens if slot_uid already exists
     let slot_info = slot_info_map
         .entry(slot_uid.clone())
-        .and_modify(|existing| merge_fields_into_slotinfo(existing, log_entry))
+        .and_modify(|existing| existing.merge_fields_from_text_entry(log_entry))
         .or_insert_with(|| {
             debug!("[INIT] Creating CommitBoostSlotInfo for slot_uid: {}", slot_uid);
-            new_slot_info_from_log_entry(log_entry, slot_uid.clone(), slot.clone())
+            CommitBoostSlotInfo::from_text_entry(log_entry, slot_uid.clone(), slot.clone())
         });
 
     match span.method.as_str() {
@@ -226,10 +226,11 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
 
                 // Resolve only if header's block_hash is one of the previously seen BLINDED hashes.
                 if slot_info.selected_req_id.is_none()
+                    && !bid.block_hash.is_empty()
                     && slot_info.pending_blinded_block_hashes.contains(&bid.block_hash)
                 {
                     debug!(
-                        "[RESOLVE] Found pending blinded block hash {} via header; setting selected_req_id={}",
+                        "[RESOLVE] Header matched blinded block {}; setting selected_req_id={}",
                         bid.block_hash, req_id
                     );
                     slot_info.selected_req_id = Some(req_id);
@@ -243,12 +244,12 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
             if log_entry.message == "received unblinded block" {
                 let block_hash = span.block_hash.clone().unwrap_or_default();
 
-                // Ensure the pending list always includes every blinded hash we see,
-                // even when matched immediately.
-                if !slot_info.pending_blinded_block_hashes.contains(&block_hash) {
+                // Always track blinded block hashes (authoritative on-chain candidates)
+                if !block_hash.is_empty() && !slot_info.pending_blinded_block_hashes.contains(&block_hash) {
                     slot_info.pending_blinded_block_hashes.push(block_hash.clone());
                 }
 
+                // Try to match to an existing request/bid with SAME block_hash
                 let mut matched_req_ids: Vec<(&String, &CommitBoostRequest)> = slot_info
                     .requests
                     .iter()
@@ -277,7 +278,7 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
                     let (best_req_id, _) = matched_req_ids[0];
 
                     if slot_info.selected_req_id.is_none()
-                        || slot_info.get_block_hash() != block_hash
+                        || slot_info.block_hash != block_hash
                     {
                         debug!(
                             "[SUBMIT] Selected best matching req_id={} with highest bid for blinded block_hash={}",
@@ -290,8 +291,9 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
                             format!("{}", span.block_number.unwrap_or_default());
                     }
                 } else {
+                    // keep it recorded only; resolution may happen later via header
                     debug!(
-                        "[DEFER] No matching request yet for blinded block {}; storing for later in slot_uid={}",
+                        "[DEFER] Blinded block {} recorded for slot_uid={}",
                         block_hash, slot_uid
                     );
                 }
@@ -302,28 +304,31 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
     }
 }
 
-fn merge_fields_into_slotinfo(info: &mut CommitBoostSlotInfo, log_entry: &CommitBoostLogEntry) {
-    // IMPORTANT: Do NOT set info.block_hash here from header fields.
-    // We only ever set block_hash when we have a blinded match.
-    if info.block_number.is_empty() {
-        if let Some(num) = log_entry.span.block_number {
-            if num != 0 {
-                info.block_number = num.to_string();
+// === Text-only helpers on CommitBoostSlotInfo (distinct names to avoid conflicts) ===
+impl CommitBoostSlotInfo {
+    /// Never set `block_hash` here; only via blinded matches. Capture `block_number` opportunistically.
+    pub fn merge_fields_from_text_entry(&mut self, log_entry: &CommitBoostLogEntry) {
+        if self.block_number.is_empty() {
+            if let Some(num) = log_entry.span.block_number {
+                if num != 0 {
+                    self.block_number = num.to_string();
+                }
             }
         }
     }
+
+    pub fn from_text_entry(
+        log_entry: &CommitBoostLogEntry,
+        slot_uid: String,
+        slot: String,
+    ) -> Self {
+        let mut info = CommitBoostSlotInfo::new(slot_uid, slot);
+        info.merge_fields_from_text_entry(log_entry);
+        info
+    }
 }
 
-fn new_slot_info_from_log_entry(
-    log_entry: &CommitBoostLogEntry,
-    slot_uid: String,
-    slot: String,
-) -> CommitBoostSlotInfo {
-    let mut info = CommitBoostSlotInfo::new(slot_uid, slot);
-    merge_fields_into_slotinfo(&mut info, log_entry);
-    info
-}
-
+// small helper (keep near your other helpers)
 fn host_from(relay: &str) -> String {
     Url::parse(relay)
         .ok()
@@ -332,10 +337,10 @@ fn host_from(relay: &str) -> String {
 }
 
 pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
-    // ---------- Pass 1: resolve each UID as you already do (late match + guarded fallback) ----------
     let mut slots: Vec<_> = slot_infos.keys().cloned().collect();
     slots.sort();
 
+    // ---------- Pass 1: resolve each UID (late match + STRICT fallback from blinded set) ----------
     for slot in &slots {
         if let Some(slot_map) = slot_infos.get_mut(slot) {
             let mut slot_uids: Vec<_> = slot_map.keys().cloned().collect();
@@ -343,7 +348,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
             for slot_uid in slot_uids {
                 if let Some(slot_info) = slot_map.get_mut(&slot_uid) {
-                    // Late match using pending hashes (strict)
+                    // Late match using pending hashes (kept from process_json)
                     if slot_info.selected_req_id.is_none()
                         && !slot_info.pending_blinded_block_hashes.is_empty()
                     {
@@ -389,83 +394,79 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                         }
                     }
 
-                    // Guarded fallback: only consider bids whose block_hash is in pending_blinded_block_hashes
-                    if slot_info.selected_req_id.is_none() {
-                        let mut best_bid_in_pending: Option<(String, String, Decimal)> = None;
+                    // STRICT fallback: only choose a bid whose hash is among blinded hashes
+                    if slot_info.selected_req_id.is_none()
+                        && !slot_info.pending_blinded_block_hashes.is_empty()
+                    {
+                        let allowed: BTreeSet<&str> = slot_info
+                            .pending_blinded_block_hashes
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect();
+
+                        let mut best_allowed: Option<(String, String, Decimal)> = None;
                         for (req_id, req) in &slot_info.requests {
                             for bid in &req.bids {
-                                if bid.block_hash.is_empty() || bid.bid_value <= Decimal::ZERO {
-                                    continue;
-                                }
-                                if !slot_info
-                                    .pending_blinded_block_hashes
-                                    .contains(&bid.block_hash)
+                                if !bid.block_hash.is_empty()
+                                    && allowed.contains(bid.block_hash.as_str())
+                                    && bid.bid_value > Decimal::ZERO
                                 {
-                                    // Not a blinded hash we saw -> ignore
-                                    continue;
-                                }
-                                match &best_bid_in_pending {
-                                    Some((_, _, cur)) if bid.bid_value <= *cur => {}
-                                    _ => {
-                                        best_bid_in_pending = Some((
-                                            req_id.clone(),
-                                            bid.block_hash.clone(),
-                                            bid.bid_value,
-                                        ))
+                                    match best_allowed {
+                                        Some((_, _, ref cur)) if bid.bid_value <= *cur => {}
+                                        _ => best_allowed = Some((req_id.clone(), bid.block_hash.clone(), bid.bid_value)),
                                     }
                                 }
                             }
                         }
-                        if let Some((best_req_id, block_hash, _)) = best_bid_in_pending {
+
+                        if let Some((best_req_id, block_hash, _)) = best_allowed {
                             debug!(
-                                "[AUTO-MATCH] Selected bid req_id={} block_hash={} (guarded fallback, in pending list)",
+                                "[AUTO-MATCH/STRICT] Selected req_id={} block_hash={} (from blinded set)",
                                 best_req_id, block_hash
                             );
                             slot_info.selected_req_id = Some(best_req_id);
-                            // Safe: member of pending_blinded_block_hashes
                             slot_info.block_hash = block_hash;
-                        } else if slot_info.block_hash.len() > 0
-                            && !slot_info
-                                .pending_blinded_block_hashes
-                                .contains(&slot_info.block_hash)
-                        {
-                            // If some earlier path set a non-blinded hash, clear it.
-                            debug!(
-                                "[SANITY-1] Clearing non-blinded block_hash={} in slot_uid={}",
-                                slot_info.block_hash, slot_uid
-                            );
-                            slot_info.block_hash.clear();
                         }
+                    }
+
+                    // If some earlier step set a non-blinded hash, purge it
+                    if !slot_info.block_hash.is_empty()
+                        && !slot_info.pending_blinded_block_hashes.contains(&slot_info.block_hash)
+                    {
+                        debug!(
+                            "[SANITY] Clearing non-blinded block_hash={} in slot_uid={}",
+                            slot_info.block_hash, slot_uid
+                        );
+                        slot_info.block_hash.clear();
                     }
                 }
             }
         }
     }
 
-    // ---------- Pass 2: per-slot reconciliation with strict invariants ----------
+    // ---------- Pass 2: per-slot reconciliation (apply per-UID only if header<->blinded match exists) ----------
     for slot in slots {
         let Some(slot_map) = slot_infos.get_mut(&slot) else { continue; };
 
         #[derive(Clone)]
-        struct BidView<'a> {
-            relay: &'a str,
-            host: String,
-            block_hash: &'a str,
+        struct BidView {
+            relay: String,      // owned
+            host: String,       // owned
+            block_hash: String, // owned
             value: Decimal,
         }
 
-        // Gather ALL bids across ALL UIDs/requests in this slot
+        // Gather ALL bids across ALL UIDs/requests in this slot (OWN the strings!)
         let mut all_bids: Vec<BidView> = Vec::new();
         for (_uid, info) in slot_map.iter() {
             for (_rid, req) in &info.requests {
                 for b in &req.bids {
-                    if b.block_hash.is_empty() || b.bid_value <= Decimal::ZERO {
-                        continue;
-                    }
+                    if b.block_hash.is_empty() { continue; }
+                    if b.bid_value <= Decimal::ZERO { continue; }
                     all_bids.push(BidView {
-                        relay: &b.relay,
+                        relay: b.relay.clone(),
                         host: host_from(&b.relay),
-                        block_hash: &b.block_hash,
+                        block_hash: b.block_hash.clone(),
                         value: b.bid_value,
                     });
                 }
@@ -511,7 +512,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         let mut nonproxy_at_top_hosts: BTreeSet<String> = BTreeSet::new();
         for v in &all_bids {
             if v.value == slot_top_value {
-                if is_relay_proxy(v.relay) {
+                if is_relay_proxy(&v.relay) {
                     rproxy_at_top.push(v);
                 } else {
                     nonproxy_at_top_hosts.insert(v.host.clone());
@@ -523,7 +524,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         let mut best_nonproxy_val = Decimal::ZERO;
         let mut best_nonproxy_hosts_at_best: BTreeSet<String> = BTreeSet::new();
         for v in &all_bids {
-            if !is_relay_proxy(v.relay) && v.value < slot_top_value {
+            if !is_relay_proxy(&v.relay) && v.value < slot_top_value {
                 match best_nonproxy_val.partial_cmp(&v.value) {
                     Some(std::cmp::Ordering::Less) => {
                         best_nonproxy_val = v.value;
@@ -543,10 +544,8 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
             .cloned()
             .unwrap_or_default();
 
-        // 1) If any non-proxy equals rproxy at the top value anywhere in the slot -> LOSS
         let slot_is_loss = !nonproxy_at_top_hosts.is_empty();
 
-        // 2) If rproxy wins (no non-proxy at top), choose rproxy candidate deterministically
         let (chosen_hash, chosen_proxy_host, uplift, uplift_wei, pct_precise, pct_rounded, fee_per_block) =
             if !slot_is_loss && !rproxy_at_top.is_empty() {
                 let uplift = {
@@ -566,7 +565,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
                 let mut rproxy_sorted = rproxy_at_top.clone();
                 rproxy_sorted.sort_by(|a, b| {
-                    let o = a.block_hash.cmp(b.block_hash);
+                    let o = a.block_hash.cmp(&b.block_hash);
                     if o != std::cmp::Ordering::Equal { return o; }
                     a.host.cmp(&b.host)
                 });
@@ -592,10 +591,8 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                 (String::new(), String::new(), Decimal::ZERO, U256::zero(), Decimal::ZERO, 0u64, dec!(0.0))
             };
 
-        // LOSS details
         let eq_nonproxy_join = nonproxy_at_top_hosts.iter().cloned().collect::<Vec<_>>().join(", ");
 
-        // All top hosts (proxy + non-proxy)
         let mut top_hosts_all: BTreeSet<String> = BTreeSet::new();
         for v in &all_bids {
             if v.value == slot_top_value {
@@ -604,7 +601,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         }
         let top_hosts_join = top_hosts_all.iter().cloned().collect::<Vec<_>>().join(", ");
 
-        // Write the SAME per-slot result to every UID in this slot (with invariants enforced)
+        // === APPLY PER-UID ONLY IF THE UID HAS HEADER<->BLINDED MATCH ===
         for (_uid, info) in slot_map.iter_mut() {
             // Final guard: if any stray block_hash is not in pending (i.e., non-blinded), clear it.
             if !info.block_hash.is_empty()
@@ -617,6 +614,37 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                 info.block_hash.clear();
             }
 
+            // Require a header bid matching any blinded hash for THIS UID
+            let allowed: BTreeSet<&str> = info
+                .pending_blinded_block_hashes
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+
+            let has_header_match = !allowed.is_empty() && info
+                .requests
+                .values()
+                .any(|req| req.bids.iter().any(|b| allowed.contains(b.block_hash.as_str())));
+
+            if !has_header_match {
+                // Hard skip for this UID
+                info.onchain_bid_value = Decimal::ZERO;
+                info.is_proxy_win = false;
+                info.is_equal_to_proxy_bid = false;
+                info.equal_to_proxy_bidders.clear();
+                info.el_reward_increase_eth = Decimal::ZERO;
+                info.el_reward_increase_wei = U256::zero();
+                info.el_reward_increase_percent_precise = Decimal::ZERO;
+                info.el_reward_increase_percentage = 0;
+                info.second_highest_bid_value = Decimal::ZERO;
+                info.second_higher_bid_delivered_relay.clear();
+                info.onchain_bid_delivered_relay.clear();
+                info.is_winning_bid_highest = false;
+                info.fee_per_block = dec!(0.0);
+                continue;
+            }
+
+            // We have a header-match; proceed with normal classification
             info.onchain_bid_value = slot_top_value;
             info.is_winning_bid_highest = true;
 
@@ -638,7 +666,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                 info.is_equal_to_proxy_bid = false;
                 info.equal_to_proxy_bidders.clear();
 
-                // Only set the chosen hash if it's a blinded hash we actually saw.
+                // Only set the chosen hash if it's a blinded hash we actually saw for THIS UID
                 if !chosen_hash.is_empty()
                     && info.pending_blinded_block_hashes.contains(&chosen_hash)
                 {
@@ -647,11 +675,9 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                     if !info.pending_blinded_block_hashes.contains(&info.block_hash) {
                         info.pending_blinded_block_hashes.push(info.block_hash.clone());
                     }
-                } else {
-                    // If the chosen header hash is not part of pending blinded hashes, do not set it.
-                    // (This keeps the invariant and will allow downstream to mark as skipped if needed.)
+                } else if !chosen_hash.is_empty() {
                     debug!(
-                        "[STRICT] Chosen hash not in pending blinded list; not setting block_hash for slot {}",
+                        "[STRICT] Chosen hash not in pending list for this UID; not setting block_hash (slot {}).",
                         slot
                     );
                 }
@@ -668,7 +694,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                 info.fee_per_block = fee_per_block;
             }
 
-            // One more invariant check right before the writer would consume:
+            // Invariant: if block_hash is set, it must be from pending_blinded_block_hashes
             if !info.block_hash.is_empty()
                 && !info.pending_blinded_block_hashes.contains(&info.block_hash)
             {

@@ -9,7 +9,7 @@ use std::collections::{HashMap, BTreeSet};
 use crate::Bid;
 use url::Url;
 use ethers::types::U256;
-use crate::log_source::common::{is_relay_proxy, parse_url};
+use crate::log_source::common::{is_relay_proxy};
 use log::debug;
 
 // ===============================

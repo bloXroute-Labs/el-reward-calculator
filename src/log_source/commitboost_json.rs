@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 use crate::{ CommitBoostSlotInfos};
 use serde_json::{self, Deserializer, Value};
@@ -173,8 +172,7 @@ impl CommitBoostSlotInfo {
                 }
             }
         }
-
-        // Optional: can extend to merge more fields later if needed
+        // Optional: extend later
     }
 
     pub fn from_log_entry(log_entry: &CommitBoostLogEntry, slot_uid: String, slot: String) -> Self {
@@ -183,8 +181,6 @@ impl CommitBoostSlotInfo {
         info
     }
 }
-
-
 
 // small helper (keep near your other helpers)
 fn host_from(relay: &str) -> String {
@@ -206,8 +202,6 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
             for slot_uid in slot_uids {
                 if let Some(slot_info) = slot_map.get_mut(&slot_uid) {
-                    // Late match using pending hashes (kept from process_json)
-
                     // STRICT fallback: only choose a bid whose hash is among blinded hashes
                     if slot_info.selected_req_id.is_none() && !slot_info.pending_blinded_block_hashes.is_empty() {
                         let allowed: BTreeSet<&str> = slot_info
@@ -261,14 +255,14 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         let Some(slot_map) = slot_infos.get_mut(&slot) else { continue; };
 
         #[derive(Clone)]
-        struct BidView<'a> {
-            relay: &'a str,
-            host: String,
-            block_hash: &'a str,
+        struct BidView {
+            relay: String,      // owned
+            host: String,       // owned
+            block_hash: String, // owned
             value: Decimal,
         }
 
-        // Collect bids
+        // Gather ALL bids across ALL UIDs/requests in this slot (OWN the strings!)
         let mut all_bids: Vec<BidView> = Vec::new();
         for (_uid, info) in slot_map.iter() {
             for (_rid, req) in &info.requests {
@@ -276,9 +270,9 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                     if b.block_hash.is_empty() { continue; }
                     if b.bid_value <= Decimal::ZERO { continue; }
                     all_bids.push(BidView {
-                        relay: &b.relay,
+                        relay: b.relay.clone(),
                         host: host_from(&b.relay),
-                        block_hash: &b.block_hash,
+                        block_hash: b.block_hash.clone(),
                         value: b.bid_value,
                     });
                 }
@@ -306,14 +300,15 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
             continue;
         }
 
-        // Compute slot_top and groups (unchanged) ...
+        // Slot-top value
         let slot_top_value = all_bids.iter().map(|v| v.value).fold(Decimal::ZERO, Decimal::max);
 
+        // Partition by value
         let mut rproxy_at_top: Vec<&BidView> = Vec::new();
         let mut nonproxy_at_top_hosts: BTreeSet<String> = BTreeSet::new();
         for v in &all_bids {
             if v.value == slot_top_value {
-                if is_relay_proxy(v.relay) {
+                if is_relay_proxy(&v.relay) {
                     rproxy_at_top.push(v);
                 } else {
                     nonproxy_at_top_hosts.insert(v.host.clone());
@@ -321,10 +316,11 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
             }
         }
 
+        // Best non-proxy < top
         let mut best_nonproxy_val = Decimal::ZERO;
         let mut best_nonproxy_hosts_at_best: BTreeSet<String> = BTreeSet::new();
         for v in &all_bids {
-            if !is_relay_proxy(v.relay) && v.value < slot_top_value {
+            if !is_relay_proxy(&v.relay) && v.value < slot_top_value {
                 match best_nonproxy_val.partial_cmp(&v.value) {
                     Some(std::cmp::Ordering::Less) => {
                         best_nonproxy_val = v.value;
@@ -340,12 +336,11 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         }
         let best_nonproxy_host = best_nonproxy_hosts_at_best.iter().next().cloned().unwrap_or_default();
 
+        // ======= Apply your rules =======
         let slot_is_loss = !nonproxy_at_top_hosts.is_empty();
 
-        // Candidate chosen among rproxy-at-top (for display), but DO NOT force-set unless it's blinded
-        let mut chosen_hash = String::new();
-        let mut chosen_proxy_host = String::new();
-        let (uplift, uplift_wei, pct_precise, pct_rounded, fee_per_block) =
+        // Precompute proxy candidate for display (but use only where we have header<->blinded match per UID)
+        let (chosen_hash, chosen_proxy_host, uplift, uplift_wei, pct_precise, pct_rounded, fee_per_block) =
             if !slot_is_loss && !rproxy_at_top.is_empty() {
                 let uplift = {
                     let d = slot_top_value - best_nonproxy_val;
@@ -363,13 +358,11 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
                 let mut rproxy_sorted = rproxy_at_top.clone();
                 rproxy_sorted.sort_by(|a, b| {
-                    let o = a.block_hash.cmp(b.block_hash);
+                    let o = a.block_hash.cmp(&b.block_hash);
                     if o != std::cmp::Ordering::Equal { return o; }
                     a.host.cmp(&b.host)
                 });
                 let chosen = rproxy_sorted[0];
-                chosen_hash = chosen.block_hash.to_string();
-                chosen_proxy_host = chosen.host.clone();
 
                 let fee = if pct_precise <= dec!(1) {
                     dec!(0.0)
@@ -386,22 +379,16 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                     else { dec!(0.0) }
                 };
 
-                (uplift, uplift_wei, pct_precise, pct_rounded, fee)
+                (chosen.block_hash.clone(), chosen.host.clone(), uplift, uplift_wei, pct_precise, pct_rounded, fee)
             } else {
-                (Decimal::ZERO, U256::zero(), Decimal::ZERO, 0u64, dec!(0.0))
+                (String::new(), String::new(), Decimal::ZERO, U256::zero(), Decimal::ZERO, 0u64, dec!(0.0))
             };
 
         let eq_nonproxy_join = nonproxy_at_top_hosts.iter().cloned().collect::<Vec<_>>().join(", ");
-        let mut top_hosts_all: BTreeSet<String> = BTreeSet::new();
-        for v in &all_bids {
-            if v.value == slot_top_value {
-                top_hosts_all.insert(v.host.clone());
-            }
-        }
-        let top_hosts_join = top_hosts_all.iter().cloned().collect::<Vec<_>>().join(", ");
 
+        // Apply **per UID**, but **only** if this UID has a header that matches one of its blinded hashes.
         for (_uid, info) in slot_map.iter_mut() {
-            // sanitize any preexisting non-blinded block hash
+            // Sanitize any preexisting non-blinded block hash
             if !info.block_hash.is_empty()
                 && !info.pending_blinded_block_hashes.contains(&info.block_hash)
             {
@@ -409,16 +396,56 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                 info.block_hash.clear();
             }
 
+            // Require a header bid that matches one of the blinded hashes
+            let allowed: BTreeSet<&str> = info
+                .pending_blinded_block_hashes
+                .iter()
+                .map(|s| s.as_str())
+                .collect();
+
+            let has_header_match = !allowed.is_empty() && info
+                .requests
+                .values()
+                .any(|req| req.bids.iter().any(|b| allowed.contains(b.block_hash.as_str())));
+
+            if !has_header_match {
+                // Hard skip: do not compute delivered relay, onchain value, EL, etc.
+                info.onchain_bid_value = Decimal::ZERO;
+                info.is_proxy_win = false;
+                info.is_equal_to_proxy_bid = false;
+                info.equal_to_proxy_bidders.clear();
+                info.el_reward_increase_eth = Decimal::ZERO;
+                info.el_reward_increase_wei = U256::zero();
+                info.el_reward_increase_percent_precise = Decimal::ZERO;
+                info.el_reward_increase_percentage = 0;
+                info.second_highest_bid_value = Decimal::ZERO;
+                info.second_higher_bid_delivered_relay.clear();
+                info.onchain_bid_delivered_relay.clear();
+                info.is_winning_bid_highest = false;
+                info.fee_per_block = dec!(0.0);
+                continue;
+            }
+
+            // We have a header-match; proceed with normal classification
             info.onchain_bid_value = slot_top_value;
             info.is_winning_bid_highest = true;
 
-            if slot_is_loss {
+            if !nonproxy_at_top_hosts.is_empty() {
+                // proxy loss (tie at top anywhere)
                 info.is_proxy_win = false;
                 info.is_equal_to_proxy_bid = true;
                 info.equal_to_proxy_bidders = eq_nonproxy_join.clone();
-                info.onchain_bid_delivered_relay = top_hosts_join.clone();
 
-                // DO NOT set/override block_hash here; keep only a blinded match if we had one
+                // Show all top hosts (optional), but only when we had header match
+                let mut top_hosts_all: BTreeSet<String> = BTreeSet::new();
+                for v in &all_bids {
+                    if v.value == slot_top_value {
+                        top_hosts_all.insert(v.host.clone());
+                    }
+                }
+                info.onchain_bid_delivered_relay = top_hosts_all.into_iter().collect::<Vec<_>>().join(", ");
+
+                // Do not touch block_hash unless already set via blinded match earlier
                 info.el_reward_increase_eth = Decimal::ZERO;
                 info.el_reward_increase_wei = U256::zero();
                 info.el_reward_increase_percent_precise = Decimal::ZERO;
@@ -427,19 +454,20 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
                 info.second_higher_bid_delivered_relay.clear();
                 info.fee_per_block = dec!(0.0);
             } else {
+                // proxy win
                 info.is_proxy_win = true;
                 info.is_equal_to_proxy_bid = false;
                 info.equal_to_proxy_bidders.clear();
 
-                // Only set a block_hash if it's from a blinded block we actually saw
+                // Only set a block_hash if it's from a blinded block we saw for THIS UID
                 if info.block_hash.is_empty()
                     && !chosen_hash.is_empty()
                     && info.pending_blinded_block_hashes.contains(&chosen_hash)
                 {
                     info.block_hash = chosen_hash.clone();
                 }
-
                 info.onchain_bid_delivered_relay = chosen_proxy_host.clone();
+
                 info.second_highest_bid_value = best_nonproxy_val;
                 info.second_higher_bid_delivered_relay = best_nonproxy_host.clone();
 
@@ -452,9 +480,6 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
         }
     }
 }
-
-
-
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
