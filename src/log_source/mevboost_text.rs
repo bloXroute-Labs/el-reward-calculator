@@ -4,12 +4,12 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use rust_decimal::prelude::ToPrimitive;
 use crate::{SlotInfo, SlotInfos};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, SecondsFormat};
 use std::collections::{HashMap, BTreeSet};
 use crate::Bid;
 use url::Url;
 use ethers::types::U256;
-use crate::log_source::common::{is_relay_proxy};
+use crate::log_source::common::{is_relay_proxy,get_slot_start_time_utc};
 use log::debug;
 
 // ===============================
@@ -320,6 +320,15 @@ pub fn process_lines_first_pass_mev(line: String, slot_infos: &mut SlotInfos) {
 // ===============================
 pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
     for (_slot, slot_map) in slot_infos.iter_mut() {
+        let slot_i64 = _slot.parse::<i64>().unwrap_or_default();
+                let slot_start_rfc3339 =
+                    get_slot_start_time_utc(slot_i64).to_rfc3339_opts(SecondsFormat::Millis, true);
+
+                for (_uid, info) in slot_map.iter_mut() {
+                    if info.time.is_empty() {
+                        info.time = slot_start_rfc3339.clone();
+                    }
+                }
         for (slot_uid, slot_info) in slot_map.iter_mut() {
             // Sort bids descending by value
             slot_info.info.bids.sort_by(|a, b| b.bid_value.cmp(&a.bid_value));

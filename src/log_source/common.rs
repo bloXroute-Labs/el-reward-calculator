@@ -3,6 +3,13 @@ use url::Url;
 use rust_decimal::Decimal;
 use std::{collections::{HashMap, HashSet}};
 use crate::log_source::stats_writer::RewardStats;
+// add/replace these imports near the top
+use chrono::{DateTime, Utc, TimeZone };
+
+
+// Ethereum mainnet beacon genesis & slot timing
+const BEACON_GENESIS_TIME: i64 = 1_606_824_023; // 2020-12-01T12:00:23Z
+const SECONDS_PER_SLOT: i64 = 12;
 
 pub fn is_relay_proxy(relay: &str) -> bool {
     let relay_lower = relay.to_lowercase();
@@ -110,4 +117,16 @@ pub fn filter_valid_slot_infos<T: RewardStats + Clone + std::fmt::Debug>(
     );
 
     (all_infos_map, selected_infos, selected_infos_map, skipped_by_slot)
+}
+
+
+///   return time.Unix(beaconGenesisTime + (slot * secondsPerSlot), 0).UTC()
+#[inline]
+pub fn get_slot_start_time_utc(
+    slot: i64,
+) -> DateTime<Utc> {
+    Utc
+        .timestamp_opt(BEACON_GENESIS_TIME + (slot * SECONDS_PER_SLOT), 0)
+        .single()
+        .unwrap_or_else(|| crate::Utc.timestamp_opt(0, 0).single().unwrap())
 }
