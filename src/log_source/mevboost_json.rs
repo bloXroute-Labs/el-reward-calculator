@@ -2,19 +2,18 @@ use crate::log_source::types::{Bid, LogEntry};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use crate::{SlotInfo, SlotInfos};
-use chrono::{DateTime};
+use chrono::DateTime;
 use url::Url;
- use crate::Utc;
+use crate::Utc;
 use ethers::types::U256;
 use crate::log_source::common::is_relay_proxy;
 use serde_json::{self, Deserializer, Value};
 use rust_decimal_macros::dec;
-use std::collections::{ BTreeSet};
-use log::debug;
-use std::collections::{HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
 use std::io::{Result as IoResult, Write};
 use crate::mevboost_json::serde_json::to_writer_pretty;
+use log::debug;
 
 pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfos) {
     let stream = Deserializer::from_reader(reader).into_iter::<Value>();
@@ -47,7 +46,7 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfo
             }
         }
     }
-   let _ =  cleanup_slots_without_proxy(slot_infos);
+    let _ = cleanup_slots_without_proxy(slot_infos);
     finalize_slot_infos(slot_infos)
 }
 
@@ -92,23 +91,32 @@ fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
 
                 slot_info.info.bids.push(bid);
 
-                // Opportunistic merge (e.g., block_number if provided in the header line).
-                // NOTE: merge_fields_from_log_entry will NOT set block_hash from headers (payload-only).
-                slot_info.merge_fields_from_log_entry(log_entry);
+                // DO NOT set block_hash here (headers aren’t blinded). We only add blinded
+                // hashes via getPayload and only set `info.block_hash` from that list.
             }
         }
         "getPayload" => {
             if log_entry.message.msg == "received payload from relay" {
                 slot_info.is_payload_received = true;
 
-                // Only set block_hash from payload (handled inside merge_fields_from_log_entry)
+                // Treat payload blockHash as blinded and add to pending list.
+                let bh = log_entry.message.blockHash.clone();
+                if !bh.is_empty() && !slot_info.pending_blinded_block_hashes.contains(&bh) {
+                    slot_info.pending_blinded_block_hashes.push(bh.clone());
+                }
+
+                // Only set block_hash from payload AND only if it's in the pending list (it is).
+                if slot_info.info.block_hash.is_empty() && !bh.is_empty() {
+                    slot_info.info.block_hash = bh;
+                }
+
+                // Optional: capture block number if present (merge_fields_from_log_entry leaves block_hash untouched)
                 slot_info.merge_fields_from_log_entry(log_entry);
 
                 debug!(
-                    "[GETPAYLOD] slot: {}, slot_uid: {}, payload block_hash: {}",
+                    "[GETPAYLOAD] slot: {}, slot_uid: {}, payload (blinded) block_hash: {}",
                     slot, slot_uid, log_entry.message.blockHash
                 );
-                // Remaining calculations deferred to finalize_slot_infos()
             }
         }
         _ => {}
@@ -116,257 +124,294 @@ fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
 }
 
 pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
-    for (slot, slot_map) in slot_infos.iter_mut() {
-        for (slot_uid, slot_info) in slot_map.iter_mut() {
-            // Sort bids descending by value (used by several downstream checks)
-            slot_info.info.bids.sort_by(|a, b| b.bid_value.cmp(&a.bid_value));
-            if slot_info.info.bids.is_empty() {
-                continue;
-            }
+    // Work slot-by-slot, then apply per-UID with strict gating.
+    let mut slots: Vec<_> = slot_infos.keys().cloned().collect();
+    slots.sort();
 
-            // Determine top bid value and a preferred "top hash":
-            // prefer a top hash from a relay-proxy (if present), else any top bidder’s hash
-            let max_val = slot_info.info.bids[0].bid_value;
-            let top_hash = slot_info
-                .info
-                .bids
-                .iter()
-                .filter(|b| b.bid_value == max_val)
-                .find(|b| is_relay_proxy(&b.relay))
-                .map(|b| b.block_hash.clone())
-                .or_else(|| {
-                    slot_info
-                        .info
-                        .bids
-                        .iter()
-                        .find(|b| b.bid_value == max_val)
-                        .map(|b| b.block_hash.clone())
+    for slot in slots {
+        let Some(slot_map) = slot_infos.get_mut(&slot) else { continue; };
+
+        #[derive(Clone)]
+        struct BidView {
+            relay: String,      // owned for safety
+            host: String,       // normalized host
+            block_hash: String, // blinded hash
+            value: Decimal,
+        }
+
+        // Collect ALL bids from ALL UIDs in this slot (own strings to avoid borrow conflicts).
+        let mut all_bids: Vec<BidView> = Vec::new();
+        for (_uid, info) in slot_map.iter() {
+            for b in &info.info.bids {
+                if b.block_hash.is_empty() { continue; }
+                if b.bid_value <= Decimal::ZERO { continue; }
+                all_bids.push(BidView {
+                    relay: b.relay.clone(),
+                    host: host_from(&b.relay),
+                    block_hash: b.block_hash.clone(),
+                    value: b.bid_value,
                 });
+            }
+        }
 
-            // If we do not have a payload-set block hash, initialize via top_hash or first non-empty hash
-            if slot_info.info.block_hash.is_empty() {
-                if let Some(h) = top_hash.clone().filter(|h| !h.is_empty()) {
-                    slot_info.info.block_hash = h;
-                } else if let Some(best_with_hash) =
-                    slot_info.info.bids.iter().find(|b| !b.block_hash.is_empty())
+        // If the slot has no usable bids at all, zero-out everyone and keep block-hash invariant.
+        if all_bids.is_empty() {
+            for (_uid, info) in slot_map.iter_mut() {
+                if !info.info.block_hash.is_empty()
+                    && !info.pending_blinded_block_hashes.contains(&info.info.block_hash)
                 {
-                    slot_info.info.block_hash = best_with_hash.block_hash.clone();
+                    debug!("[SANITY-EMPTY] Clearing non-blinded block_hash={} (slot {})",
+                           info.info.block_hash, slot);
+                    info.info.block_hash.clear();
+                }
+
+                info.onchain_bid_value = Decimal::ZERO;
+                info.is_proxy_win = false;
+                info.is_equal_to_proxy_bid = false;
+                info.equal_to_proxy_bidders.clear();
+                info.el_reward_increase_eth = Decimal::ZERO;
+                info.el_reward_increase_wei = U256::zero();
+                info.el_reward_increase_percent_precise = Decimal::ZERO;
+                info.el_reward_increase_percentage = 0;
+                info.second_highest_bid_value = Decimal::ZERO;
+                info.second_higher_bid_delivered_relay.clear();
+                info.onchain_bid_delivered_relay.clear();
+                info.is_winning_bid_highest = false;
+                info.fee_per_block = dec!(0.0);
+            }
+            continue;
+        }
+
+        // ---- Per-slot reconciliation (global top across UIDs) ----
+        let slot_top_value = all_bids
+            .iter()
+            .map(|v| v.value)
+            .fold(Decimal::ZERO, Decimal::max);
+
+        let mut rproxy_at_top: Vec<&BidView> = Vec::new();
+        let mut nonproxy_at_top_hosts: BTreeSet<String> = BTreeSet::new();
+        for v in &all_bids {
+            if v.value == slot_top_value {
+                if is_relay_proxy(&v.relay) {
+                    rproxy_at_top.push(v);
                 } else {
-                    debug!(
-                        "[SKIP] Slot {} (uid: {}) has no payload hash and no bid hash.",
-                        slot, slot_uid
-                    );
-                    continue;
+                    nonproxy_at_top_hosts.insert(v.host.clone());
                 }
             }
+        }
 
-            // If payload-matched bid value is LOWER than the top value, override to the top hash
-            if let Some(th) = top_hash.clone().filter(|h| !h.is_empty()) {
-                let payload_val = slot_info
-                    .info
-                    .bids
-                    .iter()
-                    .find(|b| b.block_hash == slot_info.info.block_hash)
-                    .map(|b| b.bid_value)
-                    .unwrap_or(Decimal::ZERO);
-
-                if payload_val < max_val && th != slot_info.info.block_hash {
-                    debug!(
-                        "[OVERRIDE] payload hash {} (val {}) < top val {}; replacing with {} (slot_uid={})",
-                        slot_info.info.block_hash, payload_val, max_val, th, slot_uid
-                    );
-                    slot_info.info.block_hash = th;
+        // Best non-proxy strictly below top (for uplift calc)
+        let mut best_nonproxy_val = Decimal::ZERO;
+        let mut best_nonproxy_hosts_at_best: BTreeSet<String> = BTreeSet::new();
+        for v in &all_bids {
+            if !is_relay_proxy(&v.relay) && v.value < slot_top_value {
+                match best_nonproxy_val.partial_cmp(&v.value) {
+                    Some(std::cmp::Ordering::Less) => {
+                        best_nonproxy_val = v.value;
+                        best_nonproxy_hosts_at_best.clear();
+                        best_nonproxy_hosts_at_best.insert(v.host.clone());
+                    }
+                    Some(std::cmp::Ordering::Equal) => {
+                        best_nonproxy_hosts_at_best.insert(v.host.clone());
+                    }
+                    _ => {}
                 }
             }
+        }
+        let best_nonproxy_host = best_nonproxy_hosts_at_best
+            .iter()
+            .next()
+            .cloned()
+            .unwrap_or_default();
 
-            // Find the winning bid by the chosen hash
-            let winning_block_hash = slot_info.info.block_hash.clone();
-            let winner_index = slot_info
-                .info
-                .bids
-                .iter()
-                .position(|b| b.block_hash == winning_block_hash);
+        let slot_is_loss = !nonproxy_at_top_hosts.is_empty();
 
-            let winner_idx = if let Some(i) = winner_index {
-                i
-            } else if let Some(i) = slot_info.info.bids.iter().position(|b| !b.block_hash.is_empty())
+        // Choose a deterministic rproxy candidate (hash+host) when proxies win.
+        let (chosen_hash, chosen_proxy_host, uplift, uplift_wei, pct_precise, pct_rounded, fee_per_block) =
+            if !slot_is_loss && !rproxy_at_top.is_empty() {
+                let uplift = {
+                    let d = slot_top_value - best_nonproxy_val;
+                    if d.is_sign_negative() { Decimal::ZERO } else { d }
+                };
+                let wei_multiplier = Decimal::from(1_000_000_000_000_000_000u128);
+                let uplift_wei_dec = (uplift * wei_multiplier).round();
+                let uplift_wei =
+                    U256::from_dec_str(&uplift_wei_dec.to_string()).unwrap_or_else(|_| U256::zero());
+                let pct_precise = if slot_top_value > Decimal::ZERO {
+                    (uplift / slot_top_value) * Decimal::from(100)
+                } else {
+                    Decimal::ZERO
+                };
+                let pct_rounded = pct_precise.round().to_u64().unwrap_or(0);
+
+                let mut rproxy_sorted = rproxy_at_top.clone();
+                rproxy_sorted.sort_by(|a, b| {
+                    let o = a.block_hash.cmp(&b.block_hash);
+                    if o != std::cmp::Ordering::Equal { return o; }
+                    a.host.cmp(&b.host)
+                });
+                let chosen = rproxy_sorted[0];
+
+                let fee = if pct_precise <= dec!(1) {
+                    dec!(0.0)
+                } else if pct_precise <= dec!(5) {
+                    if uplift >= dec!(0.0015) { dec!(0.0015) } else { dec!(0.0) }
+                } else if pct_precise <= dec!(9) {
+                    if uplift > dec!(0.003) { dec!(0.003) }
+                    else if uplift > dec!(0.0015) { dec!(0.0015) }
+                    else { dec!(0.0) }
+                } else {
+                    if uplift > dec!(0.005) { dec!(0.005) }
+                    else if uplift > dec!(0.003) { dec!(0.003) }
+                    else if uplift > dec!(0.0015) { dec!(0.0015) }
+                    else { dec!(0.0) }
+                };
+
+                (chosen.block_hash.clone(), chosen.host.clone(), uplift, uplift_wei, pct_precise, pct_rounded, fee)
+            } else {
+                (String::new(), String::new(), Decimal::ZERO, U256::zero(), Decimal::ZERO, 0u64, dec!(0.0))
+            };
+
+        // Strings for “loss” reporting
+        let eq_nonproxy_join = nonproxy_at_top_hosts.iter().cloned().collect::<Vec<_>>().join(", ");
+        let mut top_hosts_all: BTreeSet<String> = BTreeSet::new();
+        for v in &all_bids {
+            if v.value == slot_top_value {
+                top_hosts_all.insert(v.host.clone());
+            }
+        }
+        let top_hosts_join = top_hosts_all.iter().cloned().collect::<Vec<_>>().join(", ");
+
+        // ---- Apply per-UID ONLY IF that UID has a header-bid matching any of its *own* blinded hashes ----
+        for (_uid, info) in slot_map.iter_mut() {
+            // Clear any stray non-blinded hash before writing
+            if !info.info.block_hash.is_empty()
+                && !info.pending_blinded_block_hashes.contains(&info.info.block_hash)
             {
-                // fallback to any non-empty hash
-                slot_info.info.block_hash = slot_info.info.bids[i].block_hash.clone();
-                i
-            } else {
                 debug!(
-                    "[SKIP] No bid matches chosen hash and no alternative hash available (uid={})",
-                    slot_uid
+                    "[SANITY] Clearing non-blinded block_hash={} (slot {}) before write",
+                    info.info.block_hash, slot
                 );
-                continue;
-            };
-
-            let bid = &slot_info.info.bids[winner_idx];
-
-            // Keep/merge block_number if present
-            if slot_info.block_number.is_empty() && !bid.block_number.is_empty() {
-                slot_info.block_number = bid.block_number.clone();
+                info.info.block_hash.clear();
             }
 
-            // Highest-bidder group (by value) for winner classification
-            let highest_bid = &slot_info.info.bids[0];
-            let highest_bidders: BTreeSet<_> = slot_info
-                .info
-                .bids
+            let allowed: BTreeSet<&str> = info
+                .pending_blinded_block_hashes
                 .iter()
-                .filter(|b| b.bid_value == highest_bid.bid_value)
-                .map(|b| b.relay.clone())
+                .map(|s| s.as_str())
                 .collect();
 
-            let relay_proxy_won = highest_bidders.iter().any(|r| is_relay_proxy(r));
-            let relay_proxy_bidders: Vec<String> = if relay_proxy_won {
-                highest_bidders
-                    .iter()
-                    .filter(|r| !is_relay_proxy(r))
-                    .map(|r| {
-                        Url::parse(r)
-                            .ok()
-                            .and_then(|u| u.host_str().map(String::from))
-                            .unwrap_or_default()
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
-
-            let highest_bidder_urls: Vec<String> = highest_bidders
-                .iter()
-                .map(|r| {
-                    Url::parse(r)
-                        .ok()
-                        .and_then(|u| u.host_str().map(String::from))
-                        .unwrap_or_default()
-                })
-                .collect();
-
-            // Populate fields using the chosen winner `bid`
-            slot_info.onchain_bid_delivered_relay = highest_bidder_urls.join(", ");
-            slot_info.onchain_bid_value = bid.bid_value;
-            slot_info.equal_to_proxy_bidders = relay_proxy_bidders.join(", ");
-            slot_info.is_equal_to_proxy_bid = !relay_proxy_bidders.is_empty();
-            slot_info.is_proxy_win = relay_proxy_won && !slot_info.is_equal_to_proxy_bid;
-
-            // Is the chosen winner also in the highest-value group?
-            slot_info.is_winning_bid_highest =
-                (bid.bid_value == highest_bid.bid_value)
-                    || slot_info
-                        .info
-                        .bids
-                        .iter()
-                        .any(|b| b.block_hash == winning_block_hash && b.bid_value == highest_bid.bid_value);
-
-            if highest_bidders.len() > 1 && !relay_proxy_won {
-                debug!("[FINALIZE] Multiple highest bids, proxy did not win; skipping EL calc.");
-                continue;
-            }
-
-            // === EL uplift + fee calc (non-negative clamp) ===
-            if slot_info.is_proxy_win {
-                // Best non-proxy competitor among remaining bids
-                let second_best_bid = slot_info
+            let has_header_match = !allowed.is_empty()
+                && info
                     .info
                     .bids
                     .iter()
-                    .filter(|b| !is_relay_proxy(&b.relay))
-                    .max_by(|a, b| a.bid_value.cmp(&b.bid_value));
+                    .any(|b| allowed.contains(b.block_hash.as_str()));
 
-                let second_best_val = second_best_bid.map_or(Decimal::ZERO, |b| b.bid_value);
-                slot_info.second_highest_bid_value = second_best_val;
-                slot_info.second_higher_bid_delivered_relay = second_best_bid
-                    .map_or(String::new(), |b| {
-                        Url::parse(&b.relay)
-                            .ok()
-                            .and_then(|u| u.host_str().map(String::from))
-                            .unwrap_or_default()
-                    });
+            if !has_header_match {
+                // HARD SKIP: this UID never matched a blinded hash via its headers
+                info.onchain_bid_value = Decimal::ZERO;
+                info.is_proxy_win = false;
+                info.is_equal_to_proxy_bid = false;
+                info.equal_to_proxy_bidders.clear();
+                info.el_reward_increase_eth = Decimal::ZERO;
+                info.el_reward_increase_wei = U256::zero();
+                info.el_reward_increase_percent_precise = Decimal::ZERO;
+                info.el_reward_increase_percentage = 0;
+                info.second_highest_bid_value = Decimal::ZERO;
+                info.second_higher_bid_delivered_relay.clear();
+                info.onchain_bid_delivered_relay.clear();
+                info.is_winning_bid_highest = false;
+                info.fee_per_block = dec!(0.0);
+                // keep its pending list; leave block_hash empty (unless a valid blinded one is set later)
+                continue;
+            }
 
-                // Clamp negative uplift to zero
-                let mut el_reward_increase = slot_info.onchain_bid_value - second_best_val;
-                if el_reward_increase.is_sign_negative() {
-                    el_reward_increase = Decimal::ZERO;
-                }
+            // UID qualifies; apply per-slot classification
+            info.onchain_bid_value = slot_top_value;
+            info.is_winning_bid_highest = true;
 
-                if el_reward_increase.is_zero() || slot_info.onchain_bid_value.is_zero() {
-                    slot_info.el_reward_increase_wei = U256::zero();
-                    slot_info.el_reward_increase_eth = Decimal::ZERO;
-                    slot_info.el_reward_increase_percent_precise = Decimal::ZERO;
-                    slot_info.el_reward_increase_percentage = 0;
-                    slot_info.fee_per_block = dec!(0.0);
-                } else {
-                    let wei_multiplier = Decimal::from(1_000_000_000_000_000_000u128);
-                    let el_reward_increase_wei_decimal =
-                        (el_reward_increase * wei_multiplier).round();
-                    let el_reward_increase_wei = U256::from_dec_str(
-                        &el_reward_increase_wei_decimal.to_string(),
-                    )
-                    .unwrap_or(U256::zero());
+            if slot_is_loss {
+                // Non-proxy tied at top -> loss/tie scenario
+                info.is_proxy_win = false;
+                info.is_equal_to_proxy_bid = true;
+                info.equal_to_proxy_bidders = eq_nonproxy_join.clone();
+                info.onchain_bid_delivered_relay = top_hosts_join.clone();
 
-                    let el_reward_percent_precise =
-                        (el_reward_increase / slot_info.onchain_bid_value) * Decimal::from(100);
-
-                    slot_info.el_reward_increase_wei = el_reward_increase_wei;
-                    slot_info.el_reward_increase_eth = el_reward_increase;
-                    slot_info.el_reward_increase_percent_precise = el_reward_percent_precise;
-                    slot_info.el_reward_increase_percentage =
-                        el_reward_percent_precise.round().to_u64().unwrap_or(0);
-
-                    // Fee tiers from positive uplift only
-                    slot_info.fee_per_block = if el_reward_percent_precise <= dec!(1) {
-                        dec!(0.0)
-                    } else if el_reward_percent_precise <= dec!(5) {
-                        if el_reward_increase >= dec!(0.0015) {
-                            dec!(0.0015)
-                        } else {
-                            dec!(0.0)
-                        }
-                    } else if el_reward_percent_precise <= dec!(9) {
-                        if el_reward_increase > dec!(0.003) {
-                            dec!(0.003)
-                        } else if el_reward_increase > dec!(0.0015) {
-                            dec!(0.0015)
-                        } else {
-                            dec!(0.0)
-                        }
-                    } else {
-                        if el_reward_increase > dec!(0.005) {
-                            dec!(0.005)
-                        } else if el_reward_increase > dec!(0.003) {
-                            dec!(0.003)
-                        } else if el_reward_increase > dec!(0.0015) {
-                            dec!(0.0015)
-                        } else {
-                            dec!(0.0)
-                        }
-                    };
-                }
+                info.el_reward_increase_eth = Decimal::ZERO;
+                info.el_reward_increase_wei = U256::zero();
+                info.el_reward_increase_percent_precise = Decimal::ZERO;
+                info.el_reward_increase_percentage = 0;
+                info.second_highest_bid_value = Decimal::ZERO;
+                info.second_higher_bid_delivered_relay.clear();
+                info.fee_per_block = dec!(0.0);
             } else {
-                // Proxy didn't win or was a tie -> no uplift/fee
-                slot_info.el_reward_increase_wei = U256::zero();
-                slot_info.el_reward_increase_eth = Decimal::ZERO;
-                slot_info.el_reward_increase_percent_precise = Decimal::ZERO;
-                slot_info.el_reward_increase_percentage = 0;
-                slot_info.fee_per_block = dec!(0.0);
+                // Proxy wins
+                info.is_proxy_win = true;
+                info.is_equal_to_proxy_bid = false;
+                info.equal_to_proxy_bidders.clear();
+
+                // Only set a block_hash if the chosen top hash is one of THIS UID's blinded hashes.
+                if !chosen_hash.is_empty()
+                    && info.pending_blinded_block_hashes.contains(&chosen_hash)
+                {
+                    info.info.block_hash = chosen_hash.clone();
+                    if !info.pending_blinded_block_hashes.contains(&info.info.block_hash) {
+                        info.pending_blinded_block_hashes.push(info.info.block_hash.clone());
+                    }
+                } else if !chosen_hash.is_empty() {
+                    debug!(
+                        "[STRICT] Chosen hash not in this UID's pending list; not setting block_hash (slot {})",
+                        slot
+                    );
+                    // leave info.info.block_hash as-is (likely empty)
+                }
+
+                info.onchain_bid_delivered_relay = chosen_proxy_host.clone();
+
+                info.second_highest_bid_value = best_nonproxy_val;
+                info.second_higher_bid_delivered_relay = best_nonproxy_host.clone();
+
+                info.el_reward_increase_eth = uplift;
+                info.el_reward_increase_wei = uplift_wei;
+                info.el_reward_increase_percent_precise = pct_precise;
+                info.el_reward_increase_percentage = pct_rounded;
+                info.fee_per_block = fee_per_block;
+            }
+
+            // Final invariant: if a hash is set, it must be blinded (present in pending list).
+            if !info.info.block_hash.is_empty()
+                && !info.pending_blinded_block_hashes.contains(&info.info.block_hash)
+            {
+                debug!(
+                    "[SANITY-FINAL] Clearing non-blinded block_hash={} (slot {})",
+                    info.info.block_hash, slot
+                );
+                info.info.block_hash.clear();
             }
         }
     }
 }
 
+
 impl SlotInfo {
     /// Only set `block_hash` from payload lines; never from header lines.
+    /// Also: treat payload blockHash as blinded → push to `pending_blinded_block_hashes`.
     pub fn merge_fields_from_log_entry(&mut self, log_entry: &LogEntry) {
-        // Payload-only block_hash assignment
-        if self.info.block_hash.is_empty()
-            && log_entry.message.method == "getPayload"
+        // Payload-only block_hash assignment & pending maintenance
+        if log_entry.message.method == "getPayload"
             && log_entry.message.msg == "received payload from relay"
             && !log_entry.message.blockHash.is_empty()
         {
-            self.info.block_hash = log_entry.message.blockHash.clone();
+            let bh = log_entry.message.blockHash.clone();
+
+            if !self.pending_blinded_block_hashes.contains(&bh) {
+                self.pending_blinded_block_hashes.push(bh.clone());
+            }
+
+            if self.info.block_hash.is_empty() {
+                self.info.block_hash = bh;
+            }
         }
 
         // Opportunistically capture block_number if provided and missing
@@ -377,7 +422,6 @@ impl SlotInfo {
                 }
             }
         }
-        // Extend later if needed (e.g., parent hash, pubkey, etc.)
     }
 
     pub fn from_log_entry(log_entry: &LogEntry, slot_uid: String, slot: String) -> Self {
@@ -387,13 +431,7 @@ impl SlotInfo {
     }
 }
 
-
 /// Remove all slot_uids that have no relay-proxy bids, return them as a map, and write them to JSON.
-///
-/// - `slot_infos` is modified in place (entries without proxy bids are removed).
-/// - Returns a `SlotInfos` containing only the removed entries (grouped by slot).
-/// - Also writes the removed map to `removed_json_path` as pretty JSON.
-///
 pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) -> IoResult<SlotInfos> {
     let mut total_slot_count = slot_infos.len();
     let mut slots_checked = 0;
@@ -469,7 +507,6 @@ pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) -> IoResult<SlotI
     let dir_path = format!("slot_infos/{}/", date_str);
     fs::create_dir_all(&dir_path)?;
 
-    // Proper FILE paths (no trailing slash after .json/.txt)
     let json_path = format!("{}nonproxy_slots_{}_{}.json", dir_path, date_str, time_str);
     let summary_path = format!("{}nonproxy_slots_summary_{}_{}.txt", dir_path, date_str, time_str);
 
@@ -494,5 +531,11 @@ pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) -> IoResult<SlotI
     println!("[Cleanup] Wrote removed summary to '{}'", summary_path);
 
     Ok(removed)
+}
 
+fn host_from(relay: &str) -> String {
+    Url::parse(relay)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| relay.to_string())
 }

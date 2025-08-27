@@ -5,8 +5,19 @@ use std::{collections::{HashMap, HashSet}};
 use crate::log_source::stats_writer::RewardStats;
 
 pub fn is_relay_proxy(relay: &str) -> bool {
-    relay.contains("relay-proxy") || relay.contains("Relay Proxy") || relay.contains("rproxy") ||
-    relay.contains("rpoxy") || relay.contains("proxy1") || relay.contains("proxy2")// handle typo
+    let relay_lower = relay.to_lowercase();
+    let patterns = [
+        "relay-proxy",
+        "relay proxy",
+        "rproxy",
+        "rpoxy", // handle typo
+        "18.156.4.232",
+        "3.79.24.65",
+        "3.216.87.59",
+        "54.82.110.47",
+    ];
+
+    patterns.iter().any(|p| relay_lower.contains(p))
 }
 
 pub fn parse_url(bid: &Bid) -> String {
