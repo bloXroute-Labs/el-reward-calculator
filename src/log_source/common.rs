@@ -3,11 +3,10 @@ use url::Url;
 use rust_decimal::Decimal;
 use std::{collections::{HashMap, HashSet}};
 use crate::log_source::stats_writer::RewardStats;
-// add/replace these imports near the top
 use chrono::{DateTime, Utc, TimeZone };
 
 
-// Ethereum mainnet beacon genesis & slot timing
+// MAINNET
 const BEACON_GENESIS_TIME: i64 = 1_606_824_023; // 2020-12-01T12:00:23Z
 const SECONDS_PER_SLOT: i64 = 12;
 
@@ -121,7 +120,6 @@ pub fn filter_valid_slot_infos<T: RewardStats + Clone + std::fmt::Debug>(
 }
 
 
-///   return time.Unix(beaconGenesisTime + (slot * secondsPerSlot), 0).UTC()
 #[inline]
 pub fn get_slot_start_time_utc(
     slot: i64,

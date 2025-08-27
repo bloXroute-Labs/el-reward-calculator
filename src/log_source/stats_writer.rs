@@ -21,8 +21,7 @@ fn local_stamp() -> (String, String) {
     (date_str, time_str)
 }
 
-/// Common stats surface for both MEV-Boost and Commit-Boost slot info
-/// Common stats surface for both MEV-Boost and Commit-Boost slot info
+/// Common stats  for both MEV-Boost and Commit-Boost slot info
 pub trait RewardStats: Clone {
     fn get_uid(&self) -> &str;
     fn get_slot(&self) -> &str;

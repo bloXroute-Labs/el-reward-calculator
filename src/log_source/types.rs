@@ -43,7 +43,7 @@ pub struct CommitBoostSlotInfo {
     pub fee_per_block: Decimal,
     pub pending_blinded_block_hashes: Vec<String>,
 
-    /// NEW: RFC3339/ISO-8601 time for this slot record
+    ///RFC3339/ISO-8601 time for this slot record
     #[serde(default)]
     pub time: String,
 }
@@ -177,8 +177,7 @@ pub struct SlotInfo {
     pub fee_per_block: Decimal,
     #[serde(default)]
     pub pending_blinded_block_hashes: Vec<String>,
-
-    /// NEW: RFC3339/ISO-8601 time for this slot record
+    /// RFC3339/ISO-8601 time for this slot record
     #[serde(default)]
     pub time: String,
 }
