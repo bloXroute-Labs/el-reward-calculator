@@ -16,6 +16,7 @@ pub fn is_relay_proxy(relay: &str) -> bool {
     let patterns = [
         "relay-proxy",
         "relay proxy",
+        "proxy",
         "rproxy",
         "rpoxy", // handle typo
         "18.156.4.232",
