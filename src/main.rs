@@ -116,37 +116,35 @@ fn main() -> IoResult<()>  {
 
        match log_source {
            LogSource::CommitboostJson => {
-           let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
+               let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
                for reader in readers {
                    commitboost_json::parse_file_content(reader, &mut slot_infos);
                }
                commitboost_json::post_process_all_slots(&mut slot_infos);
-               // Always select final infos once
-               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
-               // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos, "commit_boost_json");
+               // (optional) you compute this but don't need it here
+               let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+
+               let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
+                   filter_valid_slot_infos(&slot_infos, "commit_boost_json");
 
                match output_format {
                    "csv" => {
-                       stats_writer::write_csv_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       // one row per slot
+                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                    }
                    _ => {
-                       stats_writer::write_json_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       // JSON with all UIDs per slot
+                       stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
                    }
                }
 
-               //stats_writer::write_summary_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                stats_writer::write_summary_generic(
-                   &selected_infos_map,
-                   &folder_path,
-                   &date_str,
-                   &time_str,
-                   &selected_infos, // full vec passed for debug
-                   &skipped,
+                   &selected_infos_map, &folder_path, &date_str, &time_str,
+                   &_selected_infos_vec, &skipped,
                )?;
-
            }
+
            LogSource::CommitboostText => {
                let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
                for reader in readers {
@@ -158,31 +156,25 @@ fn main() -> IoResult<()>  {
                    }
                }
                commitboost_text::post_process_all_slots(&mut slot_infos);
-               // Always select final infos once
-               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
-               // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos, "commit_boost_text");
+               let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+
+               let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
+                   filter_valid_slot_infos(&slot_infos, "commit_boost_text");
 
                match output_format {
                    "csv" => {
-                       stats_writer::write_csv_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                    }
                    _ => {
-                       stats_writer::write_json_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
                    }
                }
 
-               //stats_writer::write_summary_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                stats_writer::write_summary_generic(
-                   &selected_infos_map,
-                   &folder_path,
-                   &date_str,
-                   &time_str,
-                   &selected_infos, // full vec passed for debug
-                   &skipped,
+                   &selected_infos_map, &folder_path, &date_str, &time_str,
+                   &_selected_infos_vec, &skipped,
                )?;
-
            }
 
            LogSource::MevboostJson => {
@@ -190,29 +182,24 @@ fn main() -> IoResult<()>  {
                for reader in readers {
                    mevboost_json::parse_file_content(reader, &mut slot_infos);
                }
-               // Always select final infos once
-               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
-               // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos,"mev_boost_json");
+               let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+
+               let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
+                   filter_valid_slot_infos(&slot_infos, "mev_boost_json");
 
                match output_format {
                    "csv" => {
-                       stats_writer::write_csv_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                    }
                    _ => {
-                       stats_writer::write_json_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
                    }
                }
 
-               //stats_writer::write_summary_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                stats_writer::write_summary_generic(
-                   &selected_infos_map,
-                   &folder_path,
-                   &date_str,
-                   &time_str,
-                   &selected_infos, // full vec passed for debug
-                   &skipped,
+                   &selected_infos_map, &folder_path, &date_str, &time_str,
+                   &_selected_infos_vec, &skipped,
                )?;
            }
 
@@ -221,34 +208,31 @@ fn main() -> IoResult<()>  {
                for reader in readers {
                    vouch::parse_file_content(reader, &mut slot_infos);
                }
-               // Always select final infos once
-               let selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
-               // after finalize_slot_infos(...)
-               let (all_infos_map, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos,"vouch");
+
+               let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+
+               let (all_infos_map, _selected_infos_vec, selected_infos_map, skipped) =
+                   filter_valid_slot_infos(&slot_infos, "vouch");
 
                match output_format {
                    "csv" => {
-                       stats_writer::write_csv_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       // ensure one row per slot
+                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                    }
                    _ => {
+                       // you already had this right in Vouch
                        stats_writer::write_json_generic(&all_infos_map, &folder_path, &date_str, &time_str)?;
                    }
                }
 
-               //stats_writer::write_summary_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                stats_writer::write_summary_generic(
-                   &selected_infos_map,
-                   &folder_path,
-                   &date_str,
-                   &time_str,
-                   &selected_infos, // full vec passed for debug
-                   &skipped,
+                   &selected_infos_map, &folder_path, &date_str, &time_str,
+                   &_selected_infos_vec, &skipped,
                )?;
            }
 
            LogSource::MevboostText => {
                let mut slot_infos: SlotInfos = HashMap::new();
-
                for reader in readers {
                    for line in reader.lines() {
                        match line {
@@ -257,32 +241,25 @@ fn main() -> IoResult<()>  {
                        }
                    }
                }
-
                mevboost_text::finalize_slot_infos(&mut slot_infos);
-               // after finalize_slot_infos(...)
-               let (all_infos, selected_infos, selected_infos_map, skipped) = filter_valid_slot_infos(&slot_infos,"mev_boost_text");
+
+               let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
+                   filter_valid_slot_infos(&slot_infos, "mev_boost_text");
 
                match output_format {
                    "csv" => {
-                       stats_writer::write_csv_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                    }
                    _ => {
-                       stats_writer::write_json_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
                    }
                }
 
-               //stats_writer::write_summary_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
                stats_writer::write_summary_generic(
-                   &selected_infos_map,
-                   &folder_path,
-                   &date_str,
-                   &time_str,
-                   &selected_infos, // full vec passed for debug
-                   &skipped,
+                   &selected_infos_map, &folder_path, &date_str, &time_str,
+                   &_selected_infos_vec, &skipped,
                )?;
-
            }
-
        }
 
        Ok(())
