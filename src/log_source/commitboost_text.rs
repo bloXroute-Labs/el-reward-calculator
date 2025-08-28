@@ -1,7 +1,7 @@
 use crate::CommitBoostSlotInfos;
-use crate::log_source::common::is_relay_proxy;
+use crate::log_source::common::{is_relay_proxy,get_slot_start_time_utc};
 use crate::log_source::types::{Bid, CommitBoostRequest, CommitBoostSlotInfo};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, SecondsFormat};
 use ethers::types::U256;
 use log::debug;
 use once_cell::sync::Lazy;
@@ -447,6 +447,16 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     // ---------- Pass 2: per-slot reconciliation (apply per-UID only if header<->blinded match exists) ----------
     for slot in slots {
         let Some(slot_map) = slot_infos.get_mut(&slot) else { continue; };
+        // NEW: set RFC3339 time (slot start) for each UID in this slot if missing
+        let slot_i64 = slot.parse::<i64>().unwrap_or_default();
+        let slot_start_dt = get_slot_start_time_utc(slot_i64);
+        let slot_start_rfc3339 = slot_start_dt.to_rfc3339_opts(SecondsFormat::Millis, true);
+
+        for (_uid, info) in slot_map.iter_mut() {
+            if info.time.is_empty() {
+                info.time = slot_start_rfc3339.clone();
+            }
+        }
 
         #[derive(Clone)]
         struct BidView {

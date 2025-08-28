@@ -2,11 +2,11 @@ use crate::log_source::types::{Bid, LogEntry};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use crate::{SlotInfo, SlotInfos};
-use chrono::DateTime;
+use chrono::{DateTime, SecondsFormat};
 use url::Url;
 use crate::Utc;
 use ethers::types::U256;
-use crate::log_source::common::is_relay_proxy;
+use crate::log_source::common::{is_relay_proxy,get_slot_start_time_utc};
 use serde_json::{self, Deserializer, Value};
 use rust_decimal_macros::dec;
 use std::collections::{BTreeSet, HashMap};
@@ -130,7 +130,15 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
 
     for slot in slots {
         let Some(slot_map) = slot_infos.get_mut(&slot) else { continue; };
+        let slot_num_i64 = slot.parse::<i64>().unwrap_or_default();
+                let slot_start_dt = get_slot_start_time_utc( slot_num_i64);
+                let slot_start_rfc3339 = slot_start_dt.to_rfc3339_opts(SecondsFormat::Millis, true);
 
+                for (_uid, info) in slot_map.iter_mut() {
+                    if info.time.is_empty() {
+                        info.time = slot_start_rfc3339.clone();
+                    }
+                }
         #[derive(Clone)]
         struct BidView {
             relay: String,      // owned for safety

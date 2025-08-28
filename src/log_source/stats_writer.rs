@@ -21,7 +21,7 @@ fn local_stamp() -> (String, String) {
     (date_str, time_str)
 }
 
-/// Common stats surface for both MEV-Boost and Commit-Boost slot info
+/// Common stats  for both MEV-Boost and Commit-Boost slot info
 pub trait RewardStats: Clone {
     fn get_uid(&self) -> &str;
     fn get_slot(&self) -> &str;
@@ -43,6 +43,9 @@ pub trait RewardStats: Clone {
     fn get_equal_to_proxy_bidders(&self) -> &str;
     fn is_equal_to_proxy_bid(&self) -> bool;
     fn get_fee_per_block(&self) -> Decimal;
+
+    /// RFC3339 slot start time (derived or sourced)
+    fn get_slot_start_time(&self) -> &str;
 }
 
 impl RewardStats for SlotInfo {
@@ -66,6 +69,7 @@ impl RewardStats for SlotInfo {
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
     fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
     fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
+    fn get_slot_start_time(&self) -> &str { &self.time }
 }
 
 impl RewardStats for CommitBoostSlotInfo {
@@ -89,7 +93,9 @@ impl RewardStats for CommitBoostSlotInfo {
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
     fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
     fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
+    fn get_slot_start_time(&self) -> &str { &self.time }
 }
+
 
 /// Select exactly one UID per slot deterministically:
 /// 1) prefer proxy win with positive uplift,
@@ -230,6 +236,7 @@ pub fn write_csv_generic<T: RewardStats>(
 
     for (_slot_key, slot_info) in slot_infos {
         let record = SlotInfoWithoutBids {
+            time: slot_info.get_slot_start_time(),
             slot_uid: slot_info.get_uid(),
             slot: slot_info.get_slot(),
             block_number: slot_info.get_block_number(),

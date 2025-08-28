@@ -4,13 +4,15 @@ use serde_json::{self, Deserializer, Value};
 use chrono::{DateTime, Utc};
 use crate::log_source::types::{Bid,CommitBoostRequest, CommitBoostSlotInfo, SlotTrait};
 use ethers::types::U256;
-use crate::log_source::common::is_relay_proxy;
+use crate::log_source::common::{is_relay_proxy,get_slot_start_time_utc};
 use log::debug;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use url::Url;
 use std::collections::{BTreeSet, HashMap};
 use rust_decimal_macros::dec;
+use chrono::SecondsFormat;
+
 
 pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut CommitBoostSlotInfos) {
     let stream = Deserializer::from_reader(reader).into_iter::<Value>();
@@ -253,6 +255,16 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     // ---------- Pass 2: per-slot reconciliation ----------
     for slot in slots {
         let Some(slot_map) = slot_infos.get_mut(&slot) else { continue; };
+        // NEW: set RFC3339 time (slot start) for each UID in this slot if missing
+        let slot_i64 = slot.parse::<i64>().unwrap_or_default();
+        let slot_start_dt = get_slot_start_time_utc(slot_i64);
+        let slot_start_rfc3339 = slot_start_dt.to_rfc3339_opts(SecondsFormat::Millis, true);
+
+        for (_uid, info) in slot_map.iter_mut() {
+            if info.time.is_empty() {
+                info.time = slot_start_rfc3339.clone();
+            }
+        }
 
         #[derive(Clone)]
         struct BidView {

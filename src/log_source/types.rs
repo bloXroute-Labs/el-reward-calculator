@@ -42,6 +42,10 @@ pub struct CommitBoostSlotInfo {
     #[serde(serialize_with = "decimal_to_fixed")]
     pub fee_per_block: Decimal,
     pub pending_blinded_block_hashes: Vec<String>,
+
+    ///RFC3339/ISO-8601 time for this slot record
+    #[serde(default)]
+    pub time: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -55,6 +59,7 @@ pub struct CommitBoostRequest {
     pub block_number: String,
     pub bids: Vec<Bid>,
 }
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct BidSet {
    pub bids: Vec<Bid>,
@@ -82,6 +87,7 @@ pub struct LogEntryVouch {
     pub time: String,
     pub message: String,
 }
+
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MEVBoostJSONLogEntry {
@@ -171,6 +177,9 @@ pub struct SlotInfo {
     pub fee_per_block: Decimal,
     #[serde(default)]
     pub pending_blinded_block_hashes: Vec<String>,
+    /// RFC3339/ISO-8601 time for this slot record
+    #[serde(default)]
+    pub time: String,
 }
 
 pub fn u256_to_string<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
@@ -201,7 +210,6 @@ pub struct Bid {
     pub bid_value: Decimal,
 }
 
-
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct SlotInfoWithoutBids<'a> {
@@ -230,6 +238,7 @@ pub struct SlotInfoWithoutBids<'a> {
     pub is_equal_to_proxy_bid: bool,
     #[serde(serialize_with = "decimal_to_fixed")]
     pub fee_per_block: Decimal,
+    pub time: &'a str,
 }
 
 pub fn decimal_to_fixed<S>(x: &Decimal, serializer: S) -> Result<S::Ok, S::Error>
@@ -249,7 +258,7 @@ impl SlotInfo {
             is_proxy_win: false,
             el_reward_increase_wei: U256::default(),
             el_reward_increase_eth: Decimal::ZERO ,
-            onchain_bid_value:Decimal::ZERO ,
+            onchain_bid_value: Decimal::ZERO ,
             second_highest_bid_value: Decimal::ZERO ,
             onchain_bid_delivered_relay: String::new(),
             second_higher_bid_delivered_relay: String::new(),
@@ -261,6 +270,7 @@ impl SlotInfo {
             is_equal_to_proxy_bid: false,
             fee_per_block: Decimal::ZERO,
             pending_blinded_block_hashes: Vec::new(),
+            time: String::new(),
         }
     }
 
@@ -287,9 +297,9 @@ impl SlotInfo {
             is_equal_to_proxy_bid: false,
             fee_per_block: Decimal::ZERO ,
             pending_blinded_block_hashes: Vec::new(),
+            time: String::new(),
         }
     }
-
 }
 
 impl CommitBoostSlotInfo {
@@ -316,9 +326,11 @@ impl CommitBoostSlotInfo {
             is_equal_to_proxy_bid: false,
             fee_per_block: Decimal::ZERO ,
             pending_blinded_block_hashes: Vec::new(),
+            time: String::new(),
         }
     }
 }
+
 pub trait SlotTrait {
     fn get_uid(&self) -> &str;
     fn get_block_number(&self) -> &str;
@@ -340,6 +352,9 @@ pub trait SlotTrait {
     fn get_equal_to_proxy_bidders(&self) -> &str;
     fn is_equal_to_proxy_bid(&self) -> bool;
     fn get_fee_per_block(&self) -> Decimal;
+
+    /// NEW: access the stored time (RFC3339 string)
+    fn get_time(&self) -> &str;
 }
 
 impl SlotTrait for SlotInfo {
@@ -363,6 +378,7 @@ impl SlotTrait for SlotInfo {
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
     fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
     fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
+    fn get_time(&self) -> &str { &self.time }
 }
 
 impl SlotTrait for CommitBoostSlotInfo {
@@ -401,4 +417,5 @@ impl SlotTrait for CommitBoostSlotInfo {
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
     fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
     fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
+    fn get_time(&self) -> &str { &self.time }
 }
