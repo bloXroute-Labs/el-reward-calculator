@@ -1,30 +1,35 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
 use rust_decimal::prelude::ToPrimitive;
-use crate::{SlotInfo, SlotInfos};
+use rust_decimal_macros::dec;
+
 use chrono::{DateTime, Utc, SecondsFormat};
 use std::collections::{HashMap, BTreeSet};
-use crate::Bid;
+
 use url::Url;
 use ethers::types::U256;
-use crate::log_source::common::{is_relay_proxy,get_slot_start_time_utc};
 use log::debug;
+
+use crate::{SlotInfo, SlotInfos, Bid};
+use crate::log_source::common::{is_relay_proxy, get_slot_start_time_utc};
 
 // ===============================
 // Commit-Boost text regex patterns
-// (kept because your parser handles both sources)
 // ===============================
 lazy_static! {
     pub static ref GETHEADER_REQ_START: Regex =
         Regex::new(r"getHeader request start.*?msIntoSlot=(\d+).*?slot=(\d+).*?slotUID=([\w\-]+)")
             .unwrap();
+
     pub static ref BID_RECEIVED: Regex =
-        Regex::new(r#"msg=\\?\"bid received\\?\"(?:\s+\S+)*\s+slot=(\d+)\s+slotUID=([\w\-]+)"#).unwrap();
+        Regex::new(r#"msg=\\?\"bid received\\?\"(?:\s+\S+)*\s+slot=(\d+)\s+slotUID=([\w\-]+)"#)
+            .unwrap();
+
     pub static ref GETPAYLOAD_REQ_START: Regex = Regex::new(
         r"submitBlindedBlock request start.*?msIntoSlot=(\d+).*?slot=(\d+).*?slotUID=([\w\-]+)"
     ).unwrap();
+
     pub static ref PAYLOAD_RECEIVED: Regex =
         Regex::new(r"received payload from relay.*?slot=(\d+).*?slotUID=([\w\-]+)").unwrap();
 }
@@ -37,6 +42,7 @@ lazy_static! {
     pub static ref MEV_GETHEADER_REQ_START_A: Regex = Regex::new(
         r#"msg=\\?"getHeader request start\s*-\s*(\d+)\s*milliseconds into slot\s*(\d+)\\?""#
     ).unwrap();
+
     // alt form with kvs
     pub static ref MEV_GETHEADER_REQ_START_B: Regex = Regex::new(
         r#"getHeader request start.*?msIntoSlot=(\d+).*?slot=(\d+)"#
@@ -60,7 +66,7 @@ lazy_static! {
 }
 
 // --------- small helpers ---------
-fn get_kv<'a>(line: &'a str, key: &str) -> Option<String> {
+fn get_kv(line: &str, key: &str) -> Option<String> {
     // crude kv parser: key=value or key="value"
     for part in line.split_whitespace() {
         if let Some((k, v)) = part.split_once('=') {
@@ -73,7 +79,7 @@ fn get_kv<'a>(line: &'a str, key: &str) -> Option<String> {
 }
 
 fn get_slot_uid_or(slot: &str, line: &str) -> String {
-    // If a slotUID is present, use it; else fall back to {slot}_{parentHash} if present; else slot
+    // If slotUID present, use it; else try {slot}_{parentHash}; else just slot
     if let Some(uid) = get_kv(line, "slotUID") {
         if !uid.is_empty() {
             return uid;
@@ -96,17 +102,16 @@ fn host_from_str(relay: &str) -> String {
 
 // ===============================
 // Commit-Boost: pass 1 (text)
-// (unchanged structurally, but keep the same invariants: payload adds to pending, header only resolves)
+// (payload adds pending; header may resolve to a hash that is already pending)
 // ===============================
 pub fn process_lines_first_pass(line: String, slot_infos: &mut SlotInfos) {
     if let Some(captures) = GETHEADER_REQ_START.captures(&line) {
         let ms_into_slot = captures[1].parse::<i64>().unwrap_or(0);
         let slot = &captures[2];
         let slot_uid = &captures[3];
-        debug!("[GETHEADER] slot: {}, slot_uid: {}, ms_into_slot: {}.", slot, slot_uid, ms_into_slot);
 
-        let slot_info_with_uid = slot_infos.entry(slot.to_string()).or_insert_with(HashMap::new);
-        let slot_info = slot_info_with_uid.entry(slot_uid.to_string()).or_insert_with(|| SlotInfo::new(slot_uid.to_string()));
+        let slot_map = slot_infos.entry(slot.to_string()).or_insert_with(HashMap::new);
+        let slot_info = slot_map.entry(slot_uid.to_string()).or_insert_with(|| SlotInfo::new(slot_uid.to_string()));
         slot_info.info.header_start_ms_into_slot = ms_into_slot;
         slot_info.slot = slot.to_string();
 
@@ -114,8 +119,8 @@ pub fn process_lines_first_pass(line: String, slot_infos: &mut SlotInfos) {
         let slot = &captures[1];
         let slot_uid = &captures[2];
 
-        let slot_info_with_uid = slot_infos.entry(slot.to_string()).or_insert_with(HashMap::new);
-        let slot_info = slot_info_with_uid.entry(slot_uid.to_string()).or_insert_with(|| SlotInfo::new(slot_uid.to_string()));
+        let slot_map = slot_infos.entry(slot.to_string()).or_insert_with(HashMap::new);
+        let slot_info = slot_map.entry(slot_uid.to_string()).or_insert_with(|| SlotInfo::new(slot_uid.to_string()));
 
         let mut bid: Bid = Default::default();
         bid.slot = slot.to_string();
@@ -158,7 +163,7 @@ pub fn process_lines_first_pass(line: String, slot_infos: &mut SlotInfos) {
             && slot_info.pending_blinded_block_hashes.contains(&new_bid_hash)
         {
             debug!(
-                "[RESOLVE] Found pending blinded hash {} via header; locking block_hash (slot_uid={})",
+                "[CB RESOLVE] Found pending blinded hash {} via header; locking block_hash (slot_uid={})",
                 new_bid_hash, slot_uid
             );
             slot_info.info.block_hash = new_bid_hash.clone();
@@ -172,30 +177,30 @@ pub fn process_lines_first_pass(line: String, slot_infos: &mut SlotInfos) {
         let slot = &captures[2];
         let slot_uid = &captures[3];
 
-        let slot_info_with_uid = slot_infos.entry(slot.to_string()).or_insert_with(HashMap::new);
-        let slot_info = slot_info_with_uid.entry(slot_uid.to_string()).or_insert_with(|| SlotInfo::new(slot_uid.to_string()));
+        let slot_map = slot_infos.entry(slot.to_string()).or_insert_with(HashMap::new);
+        let slot_info = slot_map.entry(slot_uid.to_string()).or_insert_with(|| SlotInfo::new(slot_uid.to_string()));
         slot_info.info.payload_start_ms_into_slot = ms_into_slot;
 
         // Only payload may add to pending_blinded_block_hashes
-        if let Some(ph) = get_kv(&line, "blockHash") {
-            if !ph.is_empty() && !slot_info.pending_blinded_block_hashes.contains(&ph) {
-                debug!("[DEFER] payload blinded hash {}; storing pending (slot_uid={})", ph, slot_uid);
-                slot_info.pending_blinded_block_hashes.push(ph);
+        if let Some(bh) = get_kv(&line, "blockHash") {
+            if !bh.is_empty() && !slot_info.pending_blinded_block_hashes.contains(&bh) {
+                debug!("[CB DEFER] payload blinded hash {}; storing pending (slot_uid={})", bh, slot_uid);
+                slot_info.pending_blinded_block_hashes.push(bh);
             }
         }
 
     } else if let Some(captures) = PAYLOAD_RECEIVED.captures(&line) {
         let slot = &captures[1];
         let slot_uid = &captures[2];
-        let slot_info_with_uid = slot_infos.entry(slot.to_string()).or_insert_with(HashMap::new);
-        let slot_info = slot_info_with_uid.entry(slot_uid.to_string()).or_insert_with(|| SlotInfo::new(slot_uid.to_string()));
+        let slot_map = slot_infos.entry(slot.to_string()).or_insert_with(HashMap::new);
+        let slot_info = slot_map.entry(slot_uid.to_string()).or_insert_with(|| SlotInfo::new(slot_uid.to_string()));
         slot_info.is_payload_received = true;
     }
 }
 
 // ===============================
 // MEV-Boost: pass 1 (text)
-// Enforces the same invariants as above.
+// Enforces the *same* invariants as above (per-UID; payload adds pending; header resolves).
 // ===============================
 pub fn process_lines_first_pass_mev(line: String, slot_infos: &mut SlotInfos) {
     // getHeader request start (two forms)
@@ -293,10 +298,10 @@ pub fn process_lines_first_pass_mev(line: String, slot_infos: &mut SlotInfos) {
         let slot_info = slot_map.entry(slot_uid.clone()).or_insert_with(|| SlotInfo::new(slot_uid));
         slot_info.info.payload_start_ms_into_slot = ms;
 
-        if let Some(ph) = get_kv(&line, "blockHash") {
-            if !ph.is_empty() && !slot_info.pending_blinded_block_hashes.contains(&ph) {
-                debug!("[MEV DEFER] payload blinded hash {}; storing pending", ph);
-                slot_info.pending_blinded_block_hashes.push(ph);
+        if let Some(bh) = get_kv(&line, "blockHash") {
+            if !bh.is_empty() && !slot_info.pending_blinded_block_hashes.contains(&bh) {
+                debug!("[MEV DEFER] payload blinded hash {}; storing pending", bh);
+                slot_info.pending_blinded_block_hashes.push(bh);
             }
         }
         return;
@@ -315,29 +320,29 @@ pub fn process_lines_first_pass_mev(line: String, slot_infos: &mut SlotInfos) {
 }
 
 // ===============================
-// Finalization (shared by both)
-// Strict blinded-only logic + header requirement
+// Finalization (shared by both sources)
+// Strict blinded-only logic + header requirement, computed PER-UID.
 // ===============================
 pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
-    for (_slot, slot_map) in slot_infos.iter_mut() {
-        let slot_i64 = _slot.parse::<i64>().unwrap_or_default();
-                let slot_start_rfc3339 =
-                    get_slot_start_time_utc(slot_i64).to_rfc3339_opts(SecondsFormat::Millis, true);
+    for (slot, slot_map) in slot_infos.iter_mut() {
+        // RFC3339 time for each UID if missing
+        let slot_i64 = slot.parse::<i64>().unwrap_or_default();
+        let slot_start_rfc3339 =
+            get_slot_start_time_utc(slot_i64).to_rfc3339_opts(SecondsFormat::Millis, true);
 
-                for (_uid, info) in slot_map.iter_mut() {
-                    if info.time.is_empty() {
-                        info.time = slot_start_rfc3339.clone();
-                    }
-                }
+        for (_uid, info) in slot_map.iter_mut() {
+            if info.time.is_empty() {
+                info.time = slot_start_rfc3339.clone();
+            }
+        }
+
         for (slot_uid, slot_info) in slot_map.iter_mut() {
-            // Sort bids descending by value
+            // Sort each UID's bids descending by value
             slot_info.info.bids.sort_by(|a, b| b.bid_value.cmp(&a.bid_value));
 
-            // 0) Clear any non-blinded leftovers before use
+            // Clear any non-blinded leftovers before use
             if !slot_info.info.block_hash.is_empty()
-                && !slot_info
-                    .pending_blinded_block_hashes
-                    .contains(&slot_info.info.block_hash)
+                && !slot_info.pending_blinded_block_hashes.contains(&slot_info.info.block_hash)
             {
                 debug!(
                     "[SANITY] Clearing non-blinded block_hash='{}' (uid={})",
@@ -346,14 +351,10 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 slot_info.info.block_hash.clear();
             }
 
-            // 1) Choose a blinded hash that also appears in header bids.
-            //    Prefer the already-set one; else best among pending by max bid.
+            // Pick a blinded hash that also appears in header bids.
+            // Prefer the already-set one; else best among pending by max bid in this UID.
             let chosen_hash = if !slot_info.info.block_hash.is_empty()
-                && slot_info
-                    .info
-                    .bids
-                    .iter()
-                    .any(|b| b.block_hash == slot_info.info.block_hash)
+                && slot_info.info.bids.iter().any(|b| b.block_hash == slot_info.info.block_hash)
             {
                 slot_info.info.block_hash.clone()
             } else {
@@ -377,7 +378,7 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 best.map(|(h, _)| h).unwrap_or_default()
             };
 
-            // 2) Must have a chosen blinded hash AND at least one header bid using it
+            // Must have a chosen blinded hash AND at least one header bid using it
             if chosen_hash.is_empty()
                 || !slot_info.info.bids.iter().any(|b| b.block_hash == chosen_hash)
             {
@@ -402,11 +403,8 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 continue;
             }
 
-            // 3) Enforce invariant: chosen hash must be in pending_blinded_block_hashes
-            if !slot_info
-                .pending_blinded_block_hashes
-                .contains(&chosen_hash)
-            {
+            // Enforce invariant: chosen hash must be in pending_blinded_block_hashes
+            if !slot_info.pending_blinded_block_hashes.contains(&chosen_hash) {
                 debug!(
                     "[STRICT] Chosen hash '{}' not in pending blinded list (uid={}). Clearing and skipping.",
                     chosen_hash, slot_uid
@@ -428,12 +426,9 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 continue;
             }
 
-            // 4) Lock the chosen blinded hash (ensure pending includes it)
+            // Lock the chosen blinded hash
             slot_info.info.block_hash = chosen_hash.clone();
-            if !slot_info
-                .pending_blinded_block_hashes
-                .contains(&slot_info.info.block_hash)
-            {
+            if !slot_info.pending_blinded_block_hashes.contains(&slot_info.info.block_hash) {
                 slot_info
                     .pending_blinded_block_hashes
                     .push(slot_info.info.block_hash.clone());
@@ -447,7 +442,7 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 .filter(|b| b.block_hash == slot_info.info.block_hash)
                 .collect();
             if candidates.is_empty() {
-                // Safety net (shouldn’t happen due to check above)
+                // Safety net (shouldn’t happen due to checks above)
                 continue;
             }
             candidates.sort_by(|a, b| {
@@ -459,8 +454,8 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
             let winner_bid = candidates[0];
             let onchain_val = winner_bid.bid_value;
 
-            // Highest value across slot, to check top/ties
-            let slot_top_value = slot_info
+            // Highest value in THIS UID
+            let uid_top_value = slot_info
                 .info
                 .bids
                 .iter()
@@ -468,23 +463,23 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 .max()
                 .unwrap_or(Decimal::ZERO);
 
-            // Detect top non-proxy ties
+            // Detect top non-proxy ties (per-UID)
             let top_nonproxy_hosts: BTreeSet<String> = slot_info
                 .info
                 .bids
                 .iter()
-                .filter(|b| b.bid_value == slot_top_value && !is_relay_proxy(&b.relay))
+                .filter(|b| b.bid_value == uid_top_value && !is_relay_proxy(&b.relay))
                 .map(|b| host_from_str(&b.relay))
                 .collect();
             let top_proxy_exists = slot_info
                 .info
                 .bids
                 .iter()
-                .any(|b| b.bid_value == slot_top_value && is_relay_proxy(&b.relay));
+                .any(|b| b.bid_value == uid_top_value && is_relay_proxy(&b.relay));
 
             let chosen_is_proxy = is_relay_proxy(&winner_bid.relay);
             let is_equal_to_proxy_bid = !top_nonproxy_hosts.is_empty() && top_proxy_exists;
-            let is_proxy_win = chosen_is_proxy && (slot_top_value == onchain_val) && !is_equal_to_proxy_bid;
+            let is_proxy_win = chosen_is_proxy && (uid_top_value == onchain_val) && !is_equal_to_proxy_bid;
 
             // Delivered host for chosen hash at chosen value (lexicographically smallest)
             let mut chosen_hosts_for_hash: Vec<String> = candidates
@@ -498,7 +493,7 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 .cloned()
                 .unwrap_or_else(|| host_from_str(&winner_bid.relay));
 
-            // Best non-proxy < onchain value
+            // Best non-proxy strictly below onchain value (per-UID)
             let second_best_nonproxy = slot_info
                 .info
                 .bids
@@ -511,11 +506,11 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 .map(|b| host_from_str(&b.relay))
                 .unwrap_or_default();
 
-            // Populate fields
+            // Populate fields (per-UID)
             slot_info.onchain_bid_value = onchain_val;
             slot_info.onchain_bid_delivered_relay = delivered_host;
 
-            slot_info.is_winning_bid_highest = onchain_val == slot_top_value;
+            slot_info.is_winning_bid_highest = onchain_val == uid_top_value;
             slot_info.is_equal_to_proxy_bid = is_equal_to_proxy_bid;
             slot_info.equal_to_proxy_bidders = if is_equal_to_proxy_bid {
                 top_nonproxy_hosts.iter().cloned().collect::<Vec<_>>().join(", ")
@@ -566,7 +561,7 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                     };
                 }
             } else {
-                // Loss or tie -> zero uplift/fee
+                // Loss or tie → zero uplift/fee
                 slot_info.second_highest_bid_value = Decimal::ZERO;
                 slot_info.second_higher_bid_delivered_relay.clear();
                 slot_info.el_reward_increase_wei = U256::zero();
@@ -580,7 +575,7 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
 }
 
 // ===============================
-// Optional cleanup (unchanged)
+// Optional cleanup: remove UIDs with no proxy bids at all (diagnostic)
 // ===============================
 pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) {
     let mut total_slot_count = slot_infos.len();
