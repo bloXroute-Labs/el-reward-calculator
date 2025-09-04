@@ -318,7 +318,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
             };
 
             // Build request-scoped bids (>0 only)
-            let mut req_bids: Vec<&Bid> = req.bids.iter().filter(|b| b.bid_value > Decimal::ZERO).collect();
+            let req_bids: Vec<&Bid> = req.bids.iter().filter(|b| b.bid_value > Decimal::ZERO).collect();
             if req_bids.is_empty() {
                 // Nothing useful in this request
                 info.onchain_bid_value = Decimal::ZERO;

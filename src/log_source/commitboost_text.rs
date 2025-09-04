@@ -727,7 +727,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
-struct CommitBoostLogEntry {
+pub struct CommitBoostLogEntry {
     pub timestamp: String,
     pub level: String,
     pub message: String,
@@ -739,7 +739,7 @@ struct CommitBoostLogEntry {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct FlatFields {
+pub struct FlatFields {
     pub latency: Option<String>,
     pub value_eth: Option<String>,
     pub block_hash: Option<String>,
@@ -749,7 +749,7 @@ struct FlatFields {
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-struct Span {
+pub struct Span {
     #[serde(rename = "req_id")]
     pub req_id: Option<String>,
     pub slot: Option<i64>,
