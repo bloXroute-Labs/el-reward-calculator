@@ -40,8 +40,8 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut CommitBo
 fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlotInfos) {
     let span = &log_entry.span;
     let slot = span.slot.unwrap_or_default().to_string();
-    let parent_hash = span.parent_hash.clone().unwrap_or_else(|| "unknown".to_string());
-    let slot_uid = format!("{}_{}", slot, parent_hash);
+    // let parent_hash = span.parent_hash.clone().unwrap_or_else(|| "unknown".to_string());
+    let slot_uid = format!("{}", slot);
 
     let slot_info_map = slot_infos.entry(slot.clone()).or_insert_with(HashMap::new);
 
