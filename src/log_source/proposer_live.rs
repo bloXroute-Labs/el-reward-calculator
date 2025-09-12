@@ -38,7 +38,8 @@ use url::Url;
 
 // ---- CHANGE ME: hard-coded path to the input JSON with proposer timestamps
 // const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/12265295.json";
-const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/kraken_august_slot_stats.json";
+// const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/kraken_august_slot_stats.json";
+const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/everstake_august_slot_stats.json";
 
 // ============== Types read from the local JSON ==============
 
