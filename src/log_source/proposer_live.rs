@@ -37,7 +37,8 @@ use tokio::time::sleep;
 use url::Url;
 
 // ---- CHANGE ME: hard-coded path to the input JSON with proposer timestamps
-const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/12265295.json";
+// const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/12265295.json";
+const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/kraken_august_slot_stats.json";
 
 // ============== Types read from the local JSON ==============
 
@@ -152,10 +153,12 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
 ) -> Result<()> {
     // collect the set of slots we will analyze
     let mut slots: Vec<u64> = Vec::new();
-    for s in per_slot_selected.keys() {
-        warn!("proposer_live: raw slot key = {:?}", s.trim());
-        if let Ok(k) = s.parse::<u64>() {
-            slots.push(k);
+    for (slot_str,slot_info) in per_slot_selected.iter() {
+        warn!("proposer_live: raw slot key = {:?}", slot_str.trim());
+        if slot_info.get_is_proxy_win(){
+            if let Ok(k) = slot_str.parse::<u64>() {
+                slots.push(k);
+            }
         }
     }
     if slots.is_empty() {
@@ -265,6 +268,7 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
     let mut w = WriterBuilder::new().has_headers(true).from_writer(cf);
 
     // header
+    // header
     w.write_record(&[
         "slot",
         "calc_onchain_bid_eth",
@@ -283,7 +287,9 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
         "prop_delivered_host",
         "onchain_bid_abs_diff",
         "el_reward_abs_diff",
+        "has_el_reward_diff",
     ])?;
+
 
     for (slot_str, calc) in per_slot_selected {
         let slot_u64 = match slot_str.parse::<u64>() {
@@ -295,14 +301,14 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
             None => continue,
         };
 
-        let calc_onchain = calc.get_onchain_bid_value();
-        let prop_onchain = dec_from_opt_str(prop.onchain_bid_value.as_deref());
+        let calc_onchain = truncate3_decimal(calc.get_onchain_bid_value());
+        let prop_onchain = truncate3_decimal(dec_from_opt_str(prop.onchain_bid_value.as_deref()));
 
-        let calc_uplift = calc.get_el_reward_eth();
-        let prop_uplift = dec_from_opt_str(prop.el_reward_increase_eth.as_deref());
+        let calc_uplift = truncate3_decimal(calc.get_el_reward_eth());
+        let prop_uplift = truncate3_decimal(dec_from_opt_str(prop.el_reward_increase_eth.as_deref()));
 
-        let calc_fee = calc.get_fee_per_block();
-        let prop_fee = prop.fee_per_block;
+        let calc_fee = truncate3_decimal(calc.get_fee_per_block());
+        let prop_fee = truncate3_decimal(prop.fee_per_block);
 
         let calc_proxy_win = calc.get_is_proxy_win();
         let prop_proxy_win = prop.is_proxy_win;
@@ -321,16 +327,17 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
 
         let onchain_diff = (calc_onchain - prop_onchain).abs();
         let uplift_diff = (calc_uplift - prop_uplift).abs();
+        let has_el_reward_diff = uplift_diff > Decimal::ZERO;
 
         // Build a row of owned Strings to satisfy csv's trait bounds cleanly
         let row: Vec<String> = vec![
             slot_str.clone(),
-            fmt18(calc_onchain),
-            fmt18(prop_onchain),
-            fmt18(calc_uplift),
-            fmt18(prop_uplift),
-            fmt18(calc_fee),
-            fmt18(prop_fee),
+            fmt18_truncate3(calc_onchain),
+            fmt18_truncate3(prop_onchain),
+            fmt18_truncate3(calc_uplift),
+            fmt18_truncate3(prop_uplift),
+            fmt18_truncate3(calc_fee),
+            fmt18_truncate3(prop_fee),
             calc_proxy_win.to_string(),
             prop_proxy_win.to_string(),
             calc_equal.to_string(),
@@ -339,8 +346,9 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
             prop_hash,
             calc_host,
             prop_host,
-            fmt18(onchain_diff),
-            fmt18(uplift_diff),
+            fmt18_truncate3(onchain_diff),
+            fmt18_truncate3(uplift_diff),
+            has_el_reward_diff.to_string(),
         ];
         w.write_record(&row)?;
     }
@@ -1173,4 +1181,40 @@ fn dec_from_opt_str(s: Option<&str>) -> Decimal {
 }
 fn fmt18(d: Decimal) -> String {
     format!("{:.18}", d)
+}
+fn fmt18_truncate3(d: Decimal) -> String {
+    let s = format!("{:.18}", d); // always 18 decimal places
+    if let Some(dot) = s.find('.') {
+        let int_part = &s[..dot];
+        let frac_part = &s[dot + 1..];
+
+        if frac_part.len() > 3 {
+            // drop last 3 digits
+            let truncated = &frac_part[..frac_part.len() - 3];
+            format!("{}.{}", int_part, truncated)
+        } else {
+            // if somehow shorter, just return as-is
+            s
+        }
+    } else {
+        s
+    }
+}
+fn truncate3_decimal(d: Decimal) -> Decimal {
+    // scale is always 18 decimals for ETH values
+    let s = format!("{:.18}", d);
+    if let Some(dot) = s.find('.') {
+        let int_part = &s[..dot];
+        let frac_part = &s[dot + 1..];
+
+        if frac_part.len() > 3 {
+            let truncated = &frac_part[..frac_part.len() - 3];
+            let new_str = format!("{}.{}", int_part, truncated);
+            Decimal::from_str(&new_str).unwrap_or(d)
+        } else {
+            d
+        }
+    } else {
+        d
+    }
 }
