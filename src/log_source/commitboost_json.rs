@@ -98,14 +98,23 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
         }
 
         "/eth/v1/builder/blinded_blocks" => {
-            if log_entry.message == "received unblinded block" {
-                let block_hash = span.block_hash.clone().unwrap_or_default();
+            let block_hash = span.block_hash.clone().unwrap_or_default();
 
-                // Always track blinded block hashes (authoritative on-chain candidates)
+            // Treat multiple cases as authoritative sources of blinded blocks
+            if log_entry.message == "received unblinded block"
+                || log_entry.message == "new request"
+                || log_entry.message.starts_with("failed to get payload")
+            {
                 if !block_hash.is_empty() && !slot_info.pending_blinded_block_hashes.contains(&block_hash) {
+                    debug!(
+                        "[TRACK] Recording blinded block {} from message='{}' slot_uid={}",
+                        block_hash, log_entry.message, slot_uid
+                    );
                     slot_info.pending_blinded_block_hashes.push(block_hash.clone());
                 }
+            }
 
+            if log_entry.message == "received unblinded block" {
                 // Try to match to an existing request/bid with SAME block_hash
                 let mut matched_req_ids: Vec<(&String, &CommitBoostRequest)> = slot_info
                     .requests
