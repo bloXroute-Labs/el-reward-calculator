@@ -151,50 +151,10 @@ pub struct Message {
     pub pubkey: Option<String>,
     pub txRoot: Option<String>,
     pub value: Option<String>,
-}
 
-#[derive(Clone, Debug,Default,Serialize, Deserialize)]
-pub struct SlotInfo {
-    pub slot_uid: String,
-    pub slot: String,
-    pub block_number: String,
-    pub info: RequestInfo,
-    pub is_proxy_win: bool,
-    pub is_winning_bid_highest: bool,
-    #[serde(serialize_with = "u256_to_string")]
-    pub el_reward_increase_wei: U256,
-    #[serde(serialize_with = "decimal_to_fixed")]
-    pub el_reward_increase_eth: Decimal,
-    pub onchain_bid_value: Decimal,
-    pub second_highest_bid_value: Decimal,
-    pub onchain_bid_delivered_relay: String,
-    pub second_higher_bid_delivered_relay: String,
-    pub is_payload_received: bool,
-    pub el_reward_increase_percentage: u64,
-    pub el_reward_increase_percent_precise: Decimal,
-    pub equal_to_proxy_bidders: String,
-    pub is_equal_to_proxy_bid: bool,
-    pub fee_per_block: Decimal,
+    /// Optional: request id for getHeader/getPayload lines (add this in your log producer)
     #[serde(default)]
-    pub pending_blinded_block_hashes: Vec<String>,
-    /// RFC3339/ISO-8601 time for this slot record
-    #[serde(default)]
-    pub time: String,
-}
-
-pub fn u256_to_string<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-{
-    serializer.serialize_str(&value.to_string())
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
-pub struct RequestInfo {
-    pub header_start_ms_into_slot: i64,
-    pub bids: Vec<Bid>,
-    pub payload_start_ms_into_slot: i64,
-    pub block_hash: String,
+    pub req_id: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd, Clone)]
@@ -208,6 +168,74 @@ pub struct Bid {
     pub ua: String,
     pub relay: String,
     pub bid_value: Decimal,
+}
+
+/// Legacy per-request snapshot kept for backward-compat,
+/// but computation now happens per `selected_req_id` in `requests`.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, PartialOrd)]
+pub struct RequestInfo {
+    pub header_start_ms_into_slot: i64,
+    pub bids: Vec<Bid>,
+    pub payload_start_ms_into_slot: i64,
+    pub block_hash: String,
+}
+
+/// NEW: MEV-Boost per-request container (parity with Commit-Boost)
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct MevBoostRequest {
+    pub header_start_ms_into_slot: i64,
+    pub payload_start_ms_into_slot: i64,
+    pub block_hash: String,     // chosen/validated hash for this request
+    pub pubkey: String,
+    pub parent_hash: String,
+    pub block_number: String,
+    pub bids: Vec<Bid>,         // all header bids seen for this req
+}
+
+#[derive(Clone, Debug,Default,Serialize, Deserialize)]
+pub struct SlotInfo {
+    pub slot_uid: String,
+    pub slot: String,
+    pub block_number: String,
+
+    /// Legacy flattened view (kept for compatibility in serializers/consumers)
+    pub info: RequestInfo,
+
+    /// NEW: All getHeader requests mapped by req_id (MEV-Boost parity with Commit-Boost)
+    pub requests: HashMap<String, MevBoostRequest>,
+
+    /// NEW: The selected request id (usually resolved via getPayload hash matching)
+    pub selected_req_id: Option<String>,
+
+    // ------ Computed fields ------
+    pub is_proxy_win: bool,
+    pub is_winning_bid_highest: bool,
+    #[serde(serialize_with = "u256_to_string")]
+    pub el_reward_increase_wei: U256,
+    #[serde(serialize_with = "decimal_to_fixed")]
+    pub el_reward_increase_eth: Decimal,
+    pub onchain_bid_value: Decimal,
+    pub second_highest_bid_value: Decimal,
+    pub onchain_bid_delivered_relay: String,
+    pub second_higher_bid_delivered_relay: String,
+
+    /// When true, at least one payload has been received for this UID
+    pub is_payload_received: bool,
+
+    pub el_reward_increase_percentage: u64,
+    pub el_reward_increase_percent_precise: Decimal,
+    pub equal_to_proxy_bidders: String,
+    pub is_equal_to_proxy_bid: bool,
+    pub fee_per_block: Decimal,
+
+    /// Payload (blinded) hashes observed for this UID
+    #[serde(default)]
+    pub pending_blinded_block_hashes: Vec<String>,
+
+    /// RFC3339/ISO-8601 time for this slot record
+    #[serde(default)]
+    pub time: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -241,6 +269,13 @@ pub struct SlotInfoWithoutBids<'a> {
     pub time: &'a str,
 }
 
+pub fn u256_to_string<S>(value: &U256, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.to_string())
+}
+
 pub fn decimal_to_fixed<S>(x: &Decimal, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -255,18 +290,21 @@ impl SlotInfo {
             slot: String::new(),
             block_number: String::new(),
             info: Default::default(),
+            requests: HashMap::new(),
+            selected_req_id: None,
+
             is_proxy_win: false,
             el_reward_increase_wei: U256::default(),
-            el_reward_increase_eth: Decimal::ZERO ,
-            onchain_bid_value: Decimal::ZERO ,
-            second_highest_bid_value: Decimal::ZERO ,
+            el_reward_increase_eth: Decimal::ZERO,
+            onchain_bid_value: Decimal::ZERO,
+            second_highest_bid_value: Decimal::ZERO,
             onchain_bid_delivered_relay: String::new(),
             second_higher_bid_delivered_relay: String::new(),
             is_winning_bid_highest: false,
             is_payload_received: false,
             el_reward_increase_percentage: 0,
-            el_reward_increase_percent_precise: Decimal::ZERO ,
-            equal_to_proxy_bidders:String::new(),
+            el_reward_increase_percent_precise: Decimal::ZERO,
+            equal_to_proxy_bidders: String::new(),
             is_equal_to_proxy_bid: false,
             fee_per_block: Decimal::ZERO,
             pending_blinded_block_hashes: Vec::new(),
@@ -282,20 +320,23 @@ impl SlotInfo {
             slot,
             block_number: String::new(),
             info: Default::default(),
+            requests: HashMap::new(),
+            selected_req_id: None,
+
             is_proxy_win: false,
             el_reward_increase_wei: U256::default(),
-            el_reward_increase_eth: Decimal::ZERO ,
-            onchain_bid_value: Decimal::ZERO ,
-            second_highest_bid_value: Decimal::ZERO ,
+            el_reward_increase_eth: Decimal::ZERO,
+            onchain_bid_value: Decimal::ZERO,
+            second_highest_bid_value: Decimal::ZERO,
             onchain_bid_delivered_relay: String::new(),
             second_higher_bid_delivered_relay: String::new(),
             is_winning_bid_highest: false,
             is_payload_received: false,
             el_reward_increase_percentage: 0,
-            el_reward_increase_percent_precise: Decimal::ZERO ,
+            el_reward_increase_percent_precise: Decimal::ZERO,
             equal_to_proxy_bidders:String::new(),
             is_equal_to_proxy_bid: false,
-            fee_per_block: Decimal::ZERO ,
+            fee_per_block: Decimal::ZERO,
             pending_blinded_block_hashes: Vec::new(),
             time: String::new(),
         }
@@ -313,18 +354,18 @@ impl CommitBoostSlotInfo {
             selected_req_id: None,
             is_proxy_win: false,
             el_reward_increase_wei: U256::default(),
-            el_reward_increase_eth: Decimal::ZERO ,
-            onchain_bid_value: Decimal::ZERO ,
-            second_highest_bid_value: Decimal::ZERO ,
+            el_reward_increase_eth: Decimal::ZERO,
+            onchain_bid_value: Decimal::ZERO,
+            second_highest_bid_value: Decimal::ZERO,
             onchain_bid_delivered_relay: String::new(),
             second_higher_bid_delivered_relay: String::new(),
             is_winning_bid_highest: false,
             is_payload_received: false,
             el_reward_increase_percentage: 0,
-            el_reward_increase_percent_precise: Decimal::ZERO ,
+            el_reward_increase_percent_precise: Decimal::ZERO,
             equal_to_proxy_bidders: String::new(),
             is_equal_to_proxy_bid: false,
-            fee_per_block: Decimal::ZERO ,
+            fee_per_block: Decimal::ZERO,
             pending_blinded_block_hashes: Vec::new(),
             time: String::new(),
         }
@@ -361,9 +402,36 @@ impl SlotTrait for SlotInfo {
     fn get_uid(&self) -> &str { &self.slot_uid }
     fn get_block_number(&self) -> &str { &self.block_number }
     fn get_slot(&self) -> &str { &self.slot }
-    fn get_block_hash(&self) -> &str { &self.info.block_hash }
-    fn get_header_start(&self) -> i64 { self.info.header_start_ms_into_slot }
-    fn get_payload_start(&self) -> i64 { self.info.payload_start_ms_into_slot }
+
+    /// Prefer the selected request's block hash; fall back to legacy `info.block_hash`.
+    fn get_block_hash(&self) -> &str {
+        if let Some(rid) = self.selected_req_id.as_ref() {
+            if let Some(req) = self.requests.get(rid) {
+                return req.block_hash.as_str();
+            }
+        }
+        self.info.block_hash.as_str()
+    }
+
+    /// Read starts from the selected request; fall back to legacy `info`.
+    fn get_header_start(&self) -> i64 {
+        if let Some(rid) = self.selected_req_id.as_ref() {
+            if let Some(req) = self.requests.get(rid) {
+                return req.header_start_ms_into_slot;
+            }
+        }
+        self.info.header_start_ms_into_slot
+    }
+
+    fn get_payload_start(&self) -> i64 {
+        if let Some(rid) = self.selected_req_id.as_ref() {
+            if let Some(req) = self.requests.get(rid) {
+                return req.payload_start_ms_into_slot;
+            }
+        }
+        self.info.payload_start_ms_into_slot
+    }
+
     fn is_proxy_win(&self) -> bool { self.is_proxy_win }
     fn is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
     fn get_el_reward_eth(&self) -> Decimal { self.el_reward_increase_eth }
@@ -372,7 +440,12 @@ impl SlotTrait for SlotInfo {
     fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
     fn get_second_highest_bid_value(&self) -> Decimal { self.second_highest_bid_value }
     fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
-    fn is_payload_received(&self) -> bool { self.is_payload_received }
+
+    /// Consider a payload received if we selected a request or legacy flag is true.
+    fn is_payload_received(&self) -> bool {
+        self.selected_req_id.is_some() || self.is_payload_received
+    }
+
     fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
     fn get_el_reward_precise(&self) -> Decimal { self.el_reward_increase_percent_precise }
     fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
