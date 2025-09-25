@@ -39,6 +39,7 @@ use url::Url;
 // ---- CHANGE ME: hard-coded path to the input JSON with proposer timestamps
 // const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/12265295.json";
 // const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/kraken_august_slot_stats.json";
+// const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/figment_august_slot_stats.json";
 const INPUT_JSON_PATH: &str = "/Users/bhaki/Documents/BloXroute/logs/slot_stats/2025/August/everstake_august_slot_stats.json";
 
 // ============== Types read from the local JSON ==============
@@ -154,10 +155,10 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
 ) -> Result<()> {
     // collect the set of slots we will analyze
     let mut slots: Vec<u64> = Vec::new();
-    for (slot_str,slot_info) in per_slot_selected.iter() {
-        warn!("proposer_live: raw slot key = {:?}", slot_str.trim());
+    for (_slot_str,slot_info) in per_slot_selected.iter() {
+        warn!("proposer_live: raw slot key = {:?}", slot_info.get_slot().trim());
         if slot_info.get_is_proxy_win(){
-            if let Ok(k) = slot_str.parse::<u64>() {
+            if let Ok(k) = slot_info.get_slot().parse::<u64>() {
                 slots.push(k);
             }
         }
@@ -286,6 +287,10 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
         "prop_block_hash",
         "calc_delivered_host",
         "prop_delivered_host",
+        "calc_second_highest_bid_eth",
+        "prop_second_highest_bid_eth",
+        "calc_second_highest_delivered",
+        "prop_second_highest_delivered",
         "onchain_bid_abs_diff",
         "el_reward_abs_diff",
         "has_el_reward_diff",
@@ -326,6 +331,14 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
             .clone()
             .unwrap_or_default();
 
+        let calc_second_highest = truncate3_decimal(calc.get_second_highest_bid_value());
+        let prop_second_highest = truncate3_decimal(
+            dec_from_opt_str(prop.second_highest_bid_value.as_deref())
+        );
+
+        let calc_second_delivered = calc.get_second_higher_bid_delivered_relay().to_string();
+        let prop_second_delivered = prop.second_higher_bid_delivered_relay.clone().unwrap_or_default();
+
         let onchain_diff = (calc_onchain - prop_onchain).abs();
         let uplift_diff = (calc_uplift - prop_uplift).abs();
         let has_el_reward_diff = uplift_diff > Decimal::ZERO;
@@ -347,6 +360,10 @@ pub fn run_proposer_compare_from_json_and_write<T: RewardStats>(
             prop_hash,
             calc_host,
             prop_host,
+            fmt18_truncate3(calc_second_highest),
+            fmt18_truncate3(prop_second_highest),
+            calc_second_delivered,
+            prop_second_delivered,
             fmt18_truncate3(onchain_diff),
             fmt18_truncate3(uplift_diff),
             has_el_reward_diff.to_string(),
