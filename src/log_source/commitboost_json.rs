@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
-use crate::{ CommitBoostSlotInfos};
+use crate::CommitBoostSlotInfos;
 use serde_json::{self, Deserializer, Value};
 use chrono::{DateTime, Utc};
-use crate::log_source::types::{Bid,CommitBoostRequest, CommitBoostSlotInfo, SlotTrait};
+use crate::log_source::types::{Bid, CommitBoostRequest, CommitBoostSlotInfo, SlotTrait};
 use ethers::types::U256;
-use crate::log_source::common::{is_relay_proxy,get_slot_start_time_utc};
+use crate::log_source::common::{is_relay_proxy, get_slot_start_time_utc};
 use log::debug;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -12,23 +12,23 @@ use std::collections::{BTreeSet, HashMap};
 use rust_decimal_macros::dec;
 use chrono::SecondsFormat;
 
+// --------------------------- Parsing entrypoint ---------------------------
+
 pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut CommitBoostSlotInfos) {
     let stream = Deserializer::from_reader(reader).into_iter::<Value>();
     for entry in stream {
         match entry {
             Ok(Value::Object(map)) => {
                 match serde_json::from_value::<CommitBoostLogEntry>(Value::Object(map)) {
-                    Ok(log_entry) => {
-                        process_json(&log_entry, slot_infos);
-                    }
-                    Err(e) => eprintln!("Failed to parse log entry: {}. Skipping.", e),
+                    Ok(log_entry) => process_json(&log_entry, slot_infos),
+                    Err(e) => eprintln!("Failed to parse log entry: {e}. Skipping."),
                 }
             }
             Ok(Value::Array(vec)) => {
                 for item in vec {
                     match serde_json::from_value::<CommitBoostLogEntry>(item) {
                         Ok(log_entry) => process_json(&log_entry, slot_infos),
-                        Err(e) => eprintln!("Failed to parse log entry: {}. Skipping.", e),
+                        Err(e) => eprintln!("Failed to parse log entry: {e}. Skipping."),
                     }
                 }
             }
@@ -36,6 +36,8 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut CommitBo
         }
     }
 }
+
+// --------------------------- Core per-entry logic ---------------------------
 
 fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlotInfos) {
     let span = &log_entry.span;
@@ -57,6 +59,7 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
     match span.method.as_str() {
         "/eth/v1/builder/header/{slot}/{parent_hash}/{pubkey}" => {
             if log_entry.message == "received new header" {
+                let f = log_entry.fields_view();
                 let req_id = span.req_id.clone().unwrap_or_else(|| "unknown_reqid".to_string());
 
                 let mut bid: Bid = Default::default();
@@ -65,15 +68,14 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
                 }
 
                 bid.slot = slot.clone();
-                bid.block_hash = log_entry.fields.block_hash.clone().unwrap_or_default();
-                bid.bid_value = log_entry
-                    .fields
+                bid.block_hash = f.block_hash.clone().unwrap_or_default();
+                bid.bid_value = f
                     .value_eth
                     .as_deref()
                     .unwrap_or("0.0")
                     .parse::<Decimal>()
                     .unwrap_or(Decimal::ZERO);
-                bid.relay = log_entry.fields.relay_id.clone().unwrap_or_default();
+                bid.relay = f.relay_id.clone().unwrap_or_default();
 
                 slot_info
                     .requests
@@ -166,10 +168,14 @@ fn process_json(log_entry: &CommitBoostLogEntry, slot_infos: &mut CommitBoostSlo
     }
 }
 
+// --------------------------- Helpers on CommitBoostSlotInfo ---------------------------
+
 impl CommitBoostSlotInfo {
     pub fn merge_fields_from_log_entry(&mut self, log_entry: &CommitBoostLogEntry) {
+        let f = log_entry.fields_view();
+
         if self.block_hash.is_empty() {
-            if let Some(bh) = &log_entry.fields.block_hash {
+            if let Some(bh) = &f.block_hash {
                 self.block_hash = bh.clone();
             }
         }
@@ -191,6 +197,7 @@ impl CommitBoostSlotInfo {
     }
 }
 
+// --------------------------- Misc utilities ---------------------------
 
 fn host_from(relay: &str) -> String {
     url::Url::parse(relay)
@@ -198,6 +205,8 @@ fn host_from(relay: &str) -> String {
         .and_then(|u| u.host_str().map(|s| s.to_string()))
         .unwrap_or_else(|| relay.to_string())
 }
+
+// --------------------------- Post-processing ---------------------------
 
 pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     let mut slots: Vec<_> = slot_infos.keys().cloned().collect();
@@ -327,7 +336,8 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
             };
 
             // Build request-scoped bids (>0 only)
-            let mut req_bids: Vec<&Bid> = req.bids.iter().filter(|b| b.bid_value > Decimal::ZERO).collect();
+            let mut req_bids: Vec<&crate::log_source::types::Bid> =
+                req.bids.iter().filter(|b| b.bid_value > Decimal::ZERO).collect();
             if req_bids.is_empty() {
                 // Nothing useful in this request
                 info.onchain_bid_value = Decimal::ZERO;
@@ -535,6 +545,7 @@ pub fn post_process_all_slots(slot_infos: &mut CommitBoostSlotInfos) {
     }
 }
 
+// --------------------------- Log entry types (dual-shape) ---------------------------
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[allow(dead_code)]
@@ -544,8 +555,22 @@ pub struct CommitBoostLogEntry {
     pub message: String,
     pub span: Span,
 
+    // NESTED: {"fields": {...}}
+    #[serde(default)]
+    pub fields: Option<FlatFields>,
+
+    // FLATTENED: top-level keys like value_eth, block_hash, relay_id, version
     #[serde(flatten)]
-    pub fields: FlatFields, // flattened fields like value_eth, block_hash, etc.
+    pub flat: FlatFields,
+}
+
+impl CommitBoostLogEntry {
+    /// Returns a merged view of fields:
+    /// - if nested `.fields` exists, use it;
+    /// - otherwise use `.flat` populated by flattened keys.
+    pub fn fields_view(&self) -> &FlatFields {
+        self.fields.as_ref().unwrap_or(&self.flat)
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -555,7 +580,7 @@ pub struct FlatFields {
     pub value_eth: Option<String>,
     pub block_hash: Option<String>,
     pub relay_id: Option<String>,
-    pub version: Option<String>,  // from getHeader log
+    pub version: Option<String>, // from getHeader log
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
