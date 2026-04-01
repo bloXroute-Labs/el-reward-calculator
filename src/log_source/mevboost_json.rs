@@ -98,8 +98,8 @@ fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
                 // We only set block_hash from payload ("getPayload") lines.
             }
         }
-        "getPayload" => {
-            if log_entry.message.msg == "received payload from relay" {
+        "handleGetPayloadV2" | "getPayload"=> {
+            if log_entry.message.msg == "received payload from relay" || log_entry.message.msg == "calling getPayload"{
                 slot_info.is_payload_received = true;
 
                 // Treat payload blockHash as blinded and add to pending list.

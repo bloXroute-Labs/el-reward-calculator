@@ -22,6 +22,8 @@ pub fn is_relay_proxy(relay: &str) -> bool {
         "3.79.24.65",
         "3.216.87.59",
         "54.82.110.47",
+        "3.124.10.88",
+        "18.196.87.196",
     ];
 
     patterns.iter().any(|p| relay_lower.contains(p))
