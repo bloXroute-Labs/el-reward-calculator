@@ -6,6 +6,7 @@ use log_source::commitboost_text;
 use log_source::commitboost_json;
 use log_source::vouch;
 use log_source::stats_writer;
+use log_source::proposer_live;
 use crate::log_source::common::filter_valid_slot_infos;
 use crate::log_source::types::{CommitBoostSlotInfo,SlotInfo,Bid};
 use chrono::Utc;
@@ -132,6 +133,8 @@ fn main() -> IoResult<()>  {
                    "csv" => {
                        // one row per slot
                        stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       // after stats_writer::write_csv_per_slot_generic(...)
+                       proposer_live::run_proposer_compare_from_json_and_write(&selected_infos_map, &folder_path).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
                    }
                    _ => {
                        // JSON with all UIDs per slot
@@ -191,6 +194,8 @@ fn main() -> IoResult<()>  {
                match output_format {
                    "csv" => {
                        stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+                       // after stats_writer::write_csv_per_slot_generic(...)
+                       proposer_live::run_proposer_compare_from_json_and_write(&selected_infos_map, &folder_path).map_err(|e| io::Error::new(ErrorKind::Other, e))?;
                    }
                    _ => {
                        stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
@@ -249,6 +254,7 @@ fn main() -> IoResult<()>  {
                match output_format {
                    "csv" => {
                        stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
+
                    }
                    _ => {
                        stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
