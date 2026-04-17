@@ -31,7 +31,13 @@ impl BestBidInfo {
     }
 }
 
-pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfos) {
+/// Returns `(missing_best_bid_slots, min_time, max_time)`.
+/// `min_time` / `max_time` are the earliest and latest RFC3339 timestamps
+/// seen in the log; both are empty strings when the file contains no entries.
+pub fn parse_file_content<R: std::io::Read>(
+    reader: R,
+    slot_infos: &mut SlotInfos,
+) -> (usize, String, String) {
     // Maps (block_hash, tx_root) -> proxy_url, populated from "best bid" entries
     // where at least one relay in the `relays` field is a relay-proxy.
     //
@@ -47,6 +53,39 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfo
     // bid.relay is empty for all bids.  This map is used post-stream to
     // backfill the relay field only for bids whose block was proxy-built.
     let mut best_bid_proxy_hashes: HashMap<(String, String), BestBidInfo> = HashMap::new();
+    // Slot numbers that have at least one "best bid" log entry (any relay).
+    // Used to detect slot_uids where MEV-boost never emitted a "best bid".
+    let mut best_bid_slots: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let mut min_time: Option<String> = None;
+    let mut max_time: Option<String> = None;
+
+    // Update the running min/max with a single timestamp string.
+    let mut update_time_range = |t: &str| {
+        if t.is_empty() {
+            return;
+        }
+        min_time = Some(match min_time.take() {
+            None => t.to_owned(),
+            Some(prev) => {
+                if t < prev.as_str() {
+                    t.to_owned()
+                } else {
+                    prev
+                }
+            }
+        });
+        max_time = Some(match max_time.take() {
+            None => t.to_owned(),
+            Some(prev) => {
+                if t > prev.as_str() {
+                    t.to_owned()
+                } else {
+                    prev
+                }
+            }
+        });
+    };
 
     let stream = Deserializer::from_reader(reader).into_iter::<Value>();
     for entry in stream {
@@ -54,7 +93,13 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfo
             Ok(Value::Object(map)) => {
                 match serde_json::from_value::<LogEntry>(Value::Object(map)) {
                     Ok(log_entry) => {
-                        process_json(&log_entry, slot_infos, &mut best_bid_proxy_hashes);
+                        update_time_range(&log_entry.message.time.clone());
+                        process_json(
+                            &log_entry,
+                            slot_infos,
+                            &mut best_bid_proxy_hashes,
+                            &mut best_bid_slots,
+                        );
                     }
                     Err(e) => eprintln!("Failed to parse log entry: {}. Skipping.", e),
                 }
@@ -67,7 +112,13 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfo
                 for item in vec {
                     match serde_json::from_value::<LogEntry>(item) {
                         Ok(log_entry) => {
-                            process_json(&log_entry, slot_infos, &mut best_bid_proxy_hashes)
+                            update_time_range(&log_entry.message.time.clone());
+                            process_json(
+                                &log_entry,
+                                slot_infos,
+                                &mut best_bid_proxy_hashes,
+                                &mut best_bid_slots,
+                            );
                         }
                         Err(e) => eprintln!("Failed to parse log entry: {}. Skipping.", e),
                     }
@@ -84,11 +135,25 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfo
     // using block_hash as the key into best_bid_proxy_hashes.
     backfill_proxy_relay(slot_infos, &best_bid_proxy_hashes);
 
+    // Count slot_uids where MEV-boost never emitted a "best bid" log entry
+    // for that slot number — indicating a log gap or MEV-boost restart.
+    let missing_best_bid_slots: usize = slot_infos
+        .iter()
+        .flat_map(|(slot, slot_map)| slot_map.values().map(move |_| slot))
+        .filter(|slot| !best_bid_slots.contains(*slot))
+        .count();
+
     // First, drop UIDs that never had any relay-proxy bid at all (diagnostic & cleanup).
     let _ = cleanup_slots_without_proxy(slot_infos);
 
     // Then compute per-slot classification, applying results strictly per-UID.
     finalize_slot_infos(slot_infos, &best_bid_proxy_hashes);
+
+    (
+        missing_best_bid_slots,
+        min_time.unwrap_or_default(),
+        max_time.unwrap_or_default(),
+    )
 }
 
 // ----------------------------- Parsing -------------------------------------
@@ -97,6 +162,7 @@ fn process_json(
     log_entry: &LogEntry,
     slot_infos: &mut SlotInfos,
     best_bid_proxy_hashes: &mut HashMap<(String, String), BestBidInfo>,
+    best_bid_slots: &mut std::collections::HashSet<String>,
 ) {
     let slot = log_entry.message.slot.clone();
     let slot_uid = log_entry.message.slotUID.clone();
@@ -107,6 +173,10 @@ fn process_json(
         if log_entry.message.method == "getHeader" && log_entry.message.msg == "best bid" {
             let bh = &log_entry.message.blockHash;
             let tx_root = log_entry.message.txRoot.as_deref().unwrap_or("");
+            // Record slot number in the all-best-bid set regardless of relay.
+            if !slot.is_empty() {
+                best_bid_slots.insert(slot.clone());
+            }
             if let Some(relays_str) = &log_entry.message.relays {
                 // Scan ALL relays: collect the proxy URL and any non-proxy host
                 // names.  Both signals are needed to distinguish a clean proxy

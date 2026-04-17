@@ -1,25 +1,25 @@
 #![allow(unused_variables)]
 mod log_source;
+use crate::log_source::common::filter_valid_slot_infos;
+use crate::log_source::types::{Bid, CommitBoostSlotInfo, SlotInfo};
+use chrono::Utc;
+use env_logger;
+use log_source::commitboost_json;
+use log_source::commitboost_text;
 use log_source::mevboost_json;
 use log_source::mevboost_text;
-use log_source::commitboost_text;
-use log_source::commitboost_json;
-use log_source::vouch;
 use log_source::stats_writer;
-use crate::log_source::common::filter_valid_slot_infos;
-use crate::log_source::types::{CommitBoostSlotInfo,SlotInfo,Bid};
-use chrono::Utc;
+use log_source::vouch;
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::fs::File;
-use std::path::Path;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::Result as IoResult;
 use std::io::{self, ErrorKind};
-use  std::io::Result as IoResult;
+use std::path::Path;
 use std::str::FromStr;
-use std::env;
-use env_logger;
 
 //time="2024-10-09T09:17:12.404Z" level=info msg="submitBlindedBlock request start - 1404 milliseconds into slot 10136784"
 // blockHash=0xae2c0d7e87e7eaeae842143db2970243e78a965f8390a4ea0f59de0b5403e78b
@@ -32,9 +32,6 @@ use env_logger;
 // blockHash=0x012d8bb7b700313060ca620f96ba69a3fed405ddd9a959b6a4bb1e038bb94f89
 // method=getPayload parentHash=0x70a835e90e4cae6c513d422f075eb22be7be0765d63b968340ff11f8d89b012b slot=10052773 slotUID=2fd9298d-f6fe-4a29-b303-57ebda0bee6b ua=Lighthouse/v5.3.0-d6ba8c3
 // url="https://bloxroute.regulated.blxrbdn.com/eth/v1/builder/blinded_blocks" version=1.8
-
-
-
 
 #[derive(Debug)]
 enum LogSource {
@@ -62,7 +59,6 @@ impl FromStr for LogSource {
     }
 }
 
-
 pub type SlotInfos = HashMap<String, HashMap<String, SlotInfo>>; // slot -> (slot_uid -> SlotInfo)
 pub type CommitBoostSlotInfos = HashMap<String, HashMap<String, CommitBoostSlotInfo>>;
 
@@ -74,193 +70,288 @@ pub type FinalSlotInfosCommitBoost = HashMap<String, CommitBoostSlotInfo>;
 // // for CommitBoostSlotInfo
 // let selected_commit_infos = select_final_slot_infos_generic::<CommitBoostSlotInfo>(&commitboost_slot_infos);
 
-fn main() -> IoResult<()>  {
+fn main() -> IoResult<()> {
     if env::var("RUST_LOG").is_err() {
-           env::set_var("RUST_LOG", "info");
-       }
-       env_logger::init();
+        env::set_var("RUST_LOG", "info");
+    }
+    env_logger::init();
 
-       let args: Vec<String> = env::args().collect();
-       if args.len() < 3 {
-           eprintln!("Usage: <executable> <log_file_or_folder> <log_source_flag> [csv|json]");
-           std::process::exit(1);
-       }
-       let input_path = Path::new(&args[1]);
-       let readers = if input_path.is_dir() {
-           fs::read_dir(input_path)?
-               .filter_map(Result::ok)
-               .filter(|entry| entry.path().is_file())
-               .filter_map(|entry| File::open(entry.path()).ok().map(BufReader::new))
-               .collect::<Vec<_>>()
-       } else {
-           vec![BufReader::new(File::open(input_path)?)]
-       };
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 3 {
+        eprintln!("Usage: <executable> <log_file_or_folder> <log_source_flag> [csv|json]");
+        std::process::exit(1);
+    }
+    let input_path = Path::new(&args[1]);
+    let readers = if input_path.is_dir() {
+        fs::read_dir(input_path)?
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_file())
+            .filter_map(|entry| File::open(entry.path()).ok().map(BufReader::new))
+            .collect::<Vec<_>>()
+    } else {
+        vec![BufReader::new(File::open(input_path)?)]
+    };
 
+    let validator_client_id_flag = &args[2];
+    let output_format = args.get(3).map(|s| s.as_str()).unwrap_or("json");
 
-       let validator_client_id_flag = &args[2];
-       let output_format = args.get(3).map(|s| s.as_str()).unwrap_or("json");
+    let log_source = match LogSource::from_str(validator_client_id_flag) {
+        Ok(source) => source,
+        Err(err) => {
+            eprintln!("{}", err);
+            std::process::exit(1);
+        }
+    };
 
-       let log_source = match LogSource::from_str(validator_client_id_flag) {
-           Ok(source) => source,
-           Err(err) => {
-               eprintln!("{}", err);
-               std::process::exit(1);
-           }
-       };
+    let now = Utc::now();
+    let date_str = Utc::now().format("%d_%m_%Y").to_string();
+    let time_str = now.format("%H_%M_%S").to_string();
+    let folder_path = format!("slot_infos/{}/", date_str);
+    fs::create_dir_all(&folder_path)?;
 
-       let now = Utc::now();
-       let date_str = Utc::now().format("%d_%m_%Y").to_string();
-       let time_str = now.format("%H_%M_%S").to_string();
-       let folder_path = format!("slot_infos/{}/", date_str);
-       fs::create_dir_all(&folder_path)?;
+    match log_source {
+        LogSource::CommitboostJson => {
+            let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
+            for reader in readers {
+                commitboost_json::parse_file_content(reader, &mut slot_infos);
+            }
+            commitboost_json::post_process_all_slots(&mut slot_infos);
 
-       match log_source {
-           LogSource::CommitboostJson => {
-               let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
-               for reader in readers {
-                   commitboost_json::parse_file_content(reader, &mut slot_infos);
-               }
-               commitboost_json::post_process_all_slots(&mut slot_infos);
+            // (optional) you compute this but don't need it here
+            let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
-               // (optional) you compute this but don't need it here
-               let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+            let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
+                filter_valid_slot_infos(&slot_infos, "commit_boost_json");
 
-               let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
-                   filter_valid_slot_infos(&slot_infos, "commit_boost_json");
+            match output_format {
+                "csv" => {
+                    // one row per slot
+                    stats_writer::write_csv_per_slot_generic(
+                        &selected_infos_map,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+                _ => {
+                    // JSON with all UIDs per slot
+                    stats_writer::write_json_generic(
+                        &all_infos,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+            }
 
-               match output_format {
-                   "csv" => {
-                       // one row per slot
-                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
-                   }
-                   _ => {
-                       // JSON with all UIDs per slot
-                       stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
-                   }
-               }
+            stats_writer::write_summary_generic(
+                &selected_infos_map,
+                &folder_path,
+                &date_str,
+                &time_str,
+                &_selected_infos_vec,
+                &skipped,
+                0,
+                "",
+                "",
+            )?;
+        }
 
-               stats_writer::write_summary_generic(
-                   &selected_infos_map, &folder_path, &date_str, &time_str,
-                   &_selected_infos_vec, &skipped,
-               )?;
-           }
+        LogSource::CommitboostText => {
+            let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
+            for reader in readers {
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => commitboost_text::process_lines(line, &mut slot_infos),
+                        Err(e) => eprintln!("failed to read lines: {}", e),
+                    }
+                }
+            }
+            commitboost_text::post_process_all_slots(&mut slot_infos);
 
-           LogSource::CommitboostText => {
-               let mut slot_infos: CommitBoostSlotInfos = HashMap::new();
-               for reader in readers {
-                   for line in reader.lines() {
-                       match line {
-                           Ok(line) => commitboost_text::process_lines(line, &mut slot_infos),
-                           Err(e) => eprintln!("failed to read lines: {}", e),
-                       }
-                   }
-               }
-               commitboost_text::post_process_all_slots(&mut slot_infos);
+            let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
-               let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+            let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
+                filter_valid_slot_infos(&slot_infos, "commit_boost_text");
 
-               let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
-                   filter_valid_slot_infos(&slot_infos, "commit_boost_text");
+            match output_format {
+                "csv" => {
+                    stats_writer::write_csv_per_slot_generic(
+                        &selected_infos_map,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+                _ => {
+                    stats_writer::write_json_generic(
+                        &all_infos,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+            }
 
-               match output_format {
-                   "csv" => {
-                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
-                   }
-                   _ => {
-                       stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
-                   }
-               }
+            stats_writer::write_summary_generic(
+                &selected_infos_map,
+                &folder_path,
+                &date_str,
+                &time_str,
+                &_selected_infos_vec,
+                &skipped,
+                0,
+                "",
+                "",
+            )?;
+        }
 
-               stats_writer::write_summary_generic(
-                   &selected_infos_map, &folder_path, &date_str, &time_str,
-                   &_selected_infos_vec, &skipped,
-               )?;
-           }
+        LogSource::MevboostJson => {
+            let mut slot_infos: SlotInfos = HashMap::new();
+            let mut missing_best_bid_slots = 0usize;
+            let mut log_min_time = String::new();
+            let mut log_max_time = String::new();
+            for reader in readers {
+                let (missing, min_t, max_t) =
+                    mevboost_json::parse_file_content(reader, &mut slot_infos);
+                missing_best_bid_slots += missing;
+                if log_min_time.is_empty() || (!min_t.is_empty() && min_t < log_min_time) {
+                    log_min_time = min_t;
+                }
+                if log_max_time.is_empty() || (!max_t.is_empty() && max_t > log_max_time) {
+                    log_max_time = max_t;
+                }
+            }
 
-           LogSource::MevboostJson => {
-               let mut slot_infos: SlotInfos = HashMap::new();
-               for reader in readers {
-                   mevboost_json::parse_file_content(reader, &mut slot_infos);
-               }
+            let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
-               let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+            let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
+                filter_valid_slot_infos(&slot_infos, "mev_boost_json");
 
-               let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
-                   filter_valid_slot_infos(&slot_infos, "mev_boost_json");
+            match output_format {
+                "csv" => {
+                    stats_writer::write_csv_per_slot_generic(
+                        &selected_infos_map,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+                _ => {
+                    stats_writer::write_json_generic(
+                        &all_infos,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+            }
 
-               match output_format {
-                   "csv" => {
-                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
-                   }
-                   _ => {
-                       stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
-                   }
-               }
+            stats_writer::write_summary_generic(
+                &selected_infos_map,
+                &folder_path,
+                &date_str,
+                &time_str,
+                &_selected_infos_vec,
+                &skipped,
+                missing_best_bid_slots,
+                &log_min_time,
+                &log_max_time,
+            )?;
+        }
 
-               stats_writer::write_summary_generic(
-                   &selected_infos_map, &folder_path, &date_str, &time_str,
-                   &_selected_infos_vec, &skipped,
-               )?;
-           }
+        LogSource::Vouch => {
+            let mut slot_infos: SlotInfos = HashMap::new();
+            for reader in readers {
+                vouch::parse_file_content(reader, &mut slot_infos);
+            }
 
-           LogSource::Vouch => {
-               let mut slot_infos: SlotInfos = HashMap::new();
-               for reader in readers {
-                   vouch::parse_file_content(reader, &mut slot_infos);
-               }
+            let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
 
-               let _selected_infos = stats_writer::select_final_slot_infos_generic(&slot_infos);
+            let (all_infos_map, _selected_infos_vec, selected_infos_map, skipped) =
+                filter_valid_slot_infos(&slot_infos, "vouch");
 
-               let (all_infos_map, _selected_infos_vec, selected_infos_map, skipped) =
-                   filter_valid_slot_infos(&slot_infos, "vouch");
+            match output_format {
+                "csv" => {
+                    // ensure one row per slot
+                    stats_writer::write_csv_per_slot_generic(
+                        &selected_infos_map,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+                _ => {
+                    // you already had this right in Vouch
+                    stats_writer::write_json_generic(
+                        &all_infos_map,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+            }
 
-               match output_format {
-                   "csv" => {
-                       // ensure one row per slot
-                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
-                   }
-                   _ => {
-                       // you already had this right in Vouch
-                       stats_writer::write_json_generic(&all_infos_map, &folder_path, &date_str, &time_str)?;
-                   }
-               }
+            stats_writer::write_summary_generic(
+                &selected_infos_map,
+                &folder_path,
+                &date_str,
+                &time_str,
+                &_selected_infos_vec,
+                &skipped,
+                0,
+                "",
+                "",
+            )?;
+        }
 
-               stats_writer::write_summary_generic(
-                   &selected_infos_map, &folder_path, &date_str, &time_str,
-                   &_selected_infos_vec, &skipped,
-               )?;
-           }
+        LogSource::MevboostText => {
+            let mut slot_infos: SlotInfos = HashMap::new();
+            for reader in readers {
+                for line in reader.lines() {
+                    match line {
+                        Ok(line) => mevboost_text::process_lines_first_pass(line, &mut slot_infos),
+                        Err(e) => eprintln!("failed to read lines: {}", e),
+                    }
+                }
+            }
+            mevboost_text::finalize_slot_infos(&mut slot_infos);
 
-           LogSource::MevboostText => {
-               let mut slot_infos: SlotInfos = HashMap::new();
-               for reader in readers {
-                   for line in reader.lines() {
-                       match line {
-                           Ok(line) => mevboost_text::process_lines_first_pass(line, &mut slot_infos),
-                           Err(e) => eprintln!("failed to read lines: {}", e),
-                       }
-                   }
-               }
-               mevboost_text::finalize_slot_infos(&mut slot_infos);
+            let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
+                filter_valid_slot_infos(&slot_infos, "mev_boost_text");
 
-               let (all_infos, _selected_infos_vec, selected_infos_map, skipped) =
-                   filter_valid_slot_infos(&slot_infos, "mev_boost_text");
+            match output_format {
+                "csv" => {
+                    stats_writer::write_csv_per_slot_generic(
+                        &selected_infos_map,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+                _ => {
+                    stats_writer::write_json_generic(
+                        &all_infos,
+                        &folder_path,
+                        &date_str,
+                        &time_str,
+                    )?;
+                }
+            }
 
-               match output_format {
-                   "csv" => {
-                       stats_writer::write_csv_per_slot_generic(&selected_infos_map, &folder_path, &date_str, &time_str)?;
-                   }
-                   _ => {
-                       stats_writer::write_json_generic(&all_infos, &folder_path, &date_str, &time_str)?;
-                   }
-               }
+            stats_writer::write_summary_generic(
+                &selected_infos_map,
+                &folder_path,
+                &date_str,
+                &time_str,
+                &_selected_infos_vec,
+                &skipped,
+                0,
+                "",
+                "",
+            )?;
+        }
+    }
 
-               stats_writer::write_summary_generic(
-                   &selected_infos_map, &folder_path, &date_str, &time_str,
-                   &_selected_infos_vec, &skipped,
-               )?;
-           }
-       }
-
-       Ok(())
+    Ok(())
 }
