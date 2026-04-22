@@ -95,6 +95,22 @@ fn main() -> IoResult<()> {
     let validator_client_id_flag = &args[2];
     let output_format = args.get(3).map(|s| s.as_str()).unwrap_or("json");
 
+    // Optional relay-side getheader CSV inputs.
+    // Pass as --relay-csv=<path> and/or --proxy-relay-csv=<path>.
+    let relay_csv_path: Option<String> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--relay-csv=").map(|s| s.to_string()));
+    let proxy_relay_csv_path: Option<String> = args
+        .iter()
+        .find_map(|a| a.strip_prefix("--proxy-relay-csv=").map(|s| s.to_string()));
+
+    if let Some(p) = &relay_csv_path {
+        println!("Relay getheader CSV       : {}", p);
+    }
+    if let Some(p) = &proxy_relay_csv_path {
+        println!("Relay-proxy getheader CSV : {}", p);
+    }
+
     let log_source = match LogSource::from_str(validator_client_id_flag) {
         Ok(source) => source,
         Err(err) => {
@@ -207,13 +223,36 @@ fn main() -> IoResult<()> {
         }
 
         LogSource::MevboostJson => {
+            let relay_map = relay_csv_path.as_deref().map_or_else(
+                || HashMap::new(),
+                |p| {
+                    mevboost_json::load_relay_csv(p, "relay.blxrbdn").unwrap_or_else(|e| {
+                        eprintln!("Failed to load --relay-csv '{}': {}", p, e);
+                        HashMap::new()
+                    })
+                },
+            );
+            let proxy_relay_map = proxy_relay_csv_path.as_deref().map_or_else(
+                || HashMap::new(),
+                |p| {
+                    mevboost_json::load_relay_csv(p, "relay-proxy.blxrbdn").unwrap_or_else(|e| {
+                        eprintln!("Failed to load --proxy-relay-csv '{}': {}", p, e);
+                        HashMap::new()
+                    })
+                },
+            );
+
             let mut slot_infos: SlotInfos = HashMap::new();
             let mut missing_best_bid_slots = 0usize;
             let mut log_min_time = String::new();
             let mut log_max_time = String::new();
             for reader in readers {
-                let (missing, min_t, max_t) =
-                    mevboost_json::parse_file_content(reader, &mut slot_infos);
+                let (missing, min_t, max_t) = mevboost_json::parse_file_content(
+                    reader,
+                    &mut slot_infos,
+                    &relay_map,
+                    &proxy_relay_map,
+                );
                 missing_best_bid_slots += missing;
                 if log_min_time.is_empty() || (!min_t.is_empty() && min_t < log_min_time) {
                     log_min_time = min_t;

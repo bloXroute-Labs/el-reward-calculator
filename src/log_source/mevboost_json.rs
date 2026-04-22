@@ -10,7 +10,7 @@ use rust_decimal_macros::dec;
 use serde_json::{self, Deserializer, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
-use std::io::{Result as IoResult, Write};
+use std::io::{ErrorKind, Result as IoResult, Write};
 use url::Url;
 
 /// Metadata collected from a `"best bid"` log entry for a proxy-built block.
@@ -37,6 +37,8 @@ impl BestBidInfo {
 pub fn parse_file_content<R: std::io::Read>(
     reader: R,
     slot_infos: &mut SlotInfos,
+    relay_map: &RelayBidMap,
+    proxy_relay_map: &RelayBidMap,
 ) -> (usize, String, String) {
     // Maps (block_hash, tx_root) -> proxy_url, populated from "best bid" entries
     // where at least one relay in the `relays` field is a relay-proxy.
@@ -134,6 +136,10 @@ pub fn parse_file_content<R: std::io::Read>(
     // Backfill bid.relay for any bid that still has an empty relay field,
     // using block_hash as the key into best_bid_proxy_hashes.
     backfill_proxy_relay(slot_infos, &best_bid_proxy_hashes);
+
+    // Supplement with relay-side CSV data: fills any bid.relay that is still
+    // empty after the "best bid" backfill above.
+    backfill_relay_from_csv(slot_infos, relay_map, proxy_relay_map);
 
     // Count slot_uids where MEV-boost never emitted a "best bid" log entry
     // for that slot number — indicating a log gap or MEV-boost restart.
@@ -884,4 +890,132 @@ fn host_from(relay: &str) -> String {
         .ok()
         .and_then(|u| u.host_str().map(|s| s.to_string()))
         .unwrap_or_else(|| relay.to_string())
+}
+
+// ----------------------- Relay CSV bid lookup --------------------------
+
+/// Keys are `(slot, block_hash, value_normalized)` → relay label.
+/// Loaded from external relay-side getheader CSVs and used to label
+/// bids whose `relay` field is empty in the MEV-boost log.
+///
+/// Value is `(relay_label, count)` where `count` is the number of times that
+/// `(slot, block_hash, value)` triple appeared in the CSV.  The backfill step
+/// consumes at most `count` matching log bids per key so that we never claim
+/// more bids than we actually sent.
+pub type RelayBidMap = HashMap<(String, String, rust_decimal::Decimal), (String, usize)>;
+
+/// Load a relay getheader CSV (columns: slot, block_hash, value) and build
+/// a `RelayBidMap`.  Duplicate rows for the same key increment the counter
+/// so that the backfill step can limit attribution to exactly the count of
+/// bids we sent.  Header row is expected and skipped automatically.
+pub fn load_relay_csv(path: &str, relay_label: &str) -> IoResult<RelayBidMap> {
+    let mut map = RelayBidMap::new();
+    let mut rdr = csv::Reader::from_path(path)
+        .map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string()))?;
+    for result in rdr.records() {
+        match result {
+            Ok(record) => {
+                let slot = record.get(0).unwrap_or("").trim().to_string();
+                let block_hash = record.get(1).unwrap_or("").trim().to_string();
+                let value_str = record.get(2).unwrap_or("").trim();
+                if slot.is_empty() || block_hash.is_empty() || value_str.is_empty() {
+                    continue;
+                }
+                let value_dec: Decimal = match value_str.parse() {
+                    Ok(d) => d,
+                    Err(_) => {
+                        eprintln!(
+                            "[relay-csv] Could not parse value '{}' — skipping row.",
+                            value_str
+                        );
+                        continue;
+                    }
+                };
+                // normalize() strips trailing zeros so 0.10 == 0.1 for hash/eq
+                let key = (slot, block_hash, value_dec.normalize());
+                map.entry(key)
+                    .and_modify(|(_, cnt)| *cnt += 1)
+                    .or_insert((relay_label.to_string(), 1));
+            }
+            Err(e) => eprintln!("[relay-csv] Error reading row: {} — skipping.", e),
+        }
+    }
+    let total_rows: usize = map.values().map(|(_, c)| c).sum();
+    eprintln!(
+        "[relay-csv] Loaded {} rows ({} distinct keys) from '{}' (label={})",
+        total_rows,
+        map.len(),
+        path,
+        relay_label
+    );
+    Ok(map)
+}
+
+/// For every bid whose `relay` field is still empty, look the bid up in
+/// `relay_map` (non-proxy relay) then `proxy_relay_map` (relay-proxy) by
+/// `(slot, block_hash, value)`.  At most `count` bids are labelled per
+/// composite key — matching the number of bids we actually sent according to
+/// the CSV — so bids from other relays that happen to share the same
+/// slot/hash/value are left unlabelled.
+fn backfill_relay_from_csv(
+    slot_infos: &mut SlotInfos,
+    relay_map: &RelayBidMap,
+    proxy_relay_map: &RelayBidMap,
+) {
+    if relay_map.is_empty() && proxy_relay_map.is_empty() {
+        return;
+    }
+
+    // Track how many claims have been made per key across ALL slot_infos.
+    // Keys are shared between both maps; relay_map is checked first.
+    let mut remaining: HashMap<(String, String, Decimal), usize> = HashMap::new();
+    for (key, (_, cnt)) in relay_map.iter().chain(proxy_relay_map.iter()) {
+        *remaining.entry(key.clone()).or_insert(0) += cnt;
+    }
+
+    let mut filled = 0usize;
+    // Iterate slots in sorted order for determinism.
+    let mut slots: Vec<String> = slot_infos.keys().cloned().collect();
+    slots.sort();
+    for slot in &slots {
+        let slot_map = slot_infos.get_mut(slot).unwrap();
+        let mut uids: Vec<String> = slot_map.keys().cloned().collect();
+        uids.sort();
+        for uid in &uids {
+            let info = slot_map.get_mut(uid).unwrap();
+            for bid in info.info.bids.iter_mut() {
+                if !bid.relay.is_empty() {
+                    continue; // already labelled — keep existing attribution
+                }
+                let key = (
+                    bid.slot.clone(),
+                    bid.block_hash.clone(),
+                    bid.bid_value.normalize(),
+                );
+                // Check remaining budget for this key.
+                let budget = remaining.get_mut(&key);
+                if let Some(rem) = budget {
+                    if *rem == 0 {
+                        continue; // quota exhausted for this key
+                    }
+                    // Determine label: relay_map takes priority over proxy_relay_map.
+                    let label = relay_map
+                        .get(&key)
+                        .or_else(|| proxy_relay_map.get(&key))
+                        .map(|(l, _)| l.clone());
+                    if let Some(label) = label {
+                        bid.relay = label;
+                        *rem -= 1;
+                        filled += 1;
+                    }
+                }
+            }
+        }
+    }
+    if filled > 0 {
+        eprintln!(
+            "[relay-csv] Backfilled relay label for {} bid(s) from relay CSVs.",
+            filled
+        );
+    }
 }
