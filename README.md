@@ -132,3 +132,41 @@ slot_uid,slot,block_number,header_start_ms_into_slot,payload_start_ms_into_slot,
   }
 }
 ```
+
+### Relay Proxy and Relay data CSV input
+
+For `mevboost_json` logs from MEV-boost >= v1.11.1 the `url` field was removed from `"bid received"` log lines, so all `bid.relay` fields are empty. The calculator first backfills relay attribution from `"best bid"` log entries; any remaining unlabelled bids can be supplemented using relay-side getheader CSV exports.
+
+**`--relay-csv=<path>`**
+
+Path to a CSV export of getheader requests received by the **non-proxy relay** (e.g. bloXroute relay direct).  
+Expected columns (with header row): `slot`, `block_hash`, `value` (value column is present but ignored — see note below).  
+Bids matched by `(slot, block_hash)` are labelled with the relay name derived from the file; at most as many bids are labelled as rows appear in the CSV for that key.
+
+```bash
+cargo run -- path/to/log.json mevboost_json csv \
+  --relay-csv=/path/to/relay_getheader.csv
+```
+
+**`--proxy-relay-csv=<path>`**
+
+Path to a CSV export of getheader requests received by the **relay-proxy**.  
+Same format as `--relay-csv`. Used to label bids that the relay-proxy forwarded but that were not already resolved from `"best bid"` log entries.  
+`--relay-csv` attribution takes priority over `--proxy-relay-csv` when both match the same `(slot, block_hash)`.
+
+```bash
+cargo run -- path/to/log.json mevboost_json csv \
+  --proxy-relay-csv=/path/to/relay_proxy_getheader.csv
+```
+
+Both flags are optional and may be combined:
+
+```bash
+cargo run -- path/to/log.json mevboost_json csv \
+  --relay-csv=/path/to/relay_getheader.csv \
+  --proxy-relay-csv=/path/to/relay_proxy_getheader.csv
+```
+
+> **Note on `value` column precision**: the `value` column in the CSV is ignored for matching purposes. It is stored as `DOUBLE` in the source database, which introduces float64 rounding in the last 2–3 decimal digits relative to the exact string in MEV-boost logs. Matching is done on `(slot, block_hash)` only, which is sufficient for unambiguous attribution.
+
+For now only `--proxy-relay-csv` is having effect on calculations since the relay bids are excluded from these which brought the uplift.
