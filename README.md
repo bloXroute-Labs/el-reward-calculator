@@ -170,3 +170,21 @@ cargo run -- path/to/log.json mevboost_json csv \
 > **Note on `value` column precision**: the `value` column in the CSV is ignored for matching purposes. It is stored as `DOUBLE` in the source database, which introduces float64 rounding in the last 2–3 decimal digits relative to the exact string in MEV-boost logs. Matching is done on `(slot, block_hash)` only, which is sufficient for unambiguous attribution.
 
 For now only `--proxy-relay-csv` is having effect on calculations since the relay bids are excluded from these which brought the uplift.
+
+### Running for Figment
+1. Go to https://github.com/bloXroute-Labs/loki-fetcher and run `python3 ./scripts/figment.py <path to csv report>`
+2. Export relay proxy data for given month into CSV file:
+```
+SELECT 
+	slot, 
+	block_hash,
+	block_value AS value
+FROM 
+	eth_mev.relay_proxy_provided_header 
+WHERE  
+  validator_id = 'figment' AND timestamp BETWEEN "2026-01-01 00:00:00" and "2026-01-31 23:59:59";
+```
+3. Run reward calculator:
+```
+RUST_LOG=debug cargo run <path to json report got on step 1> mevboost_json csv --proxy-relay-csv=<path to DB CSV export>
+```
