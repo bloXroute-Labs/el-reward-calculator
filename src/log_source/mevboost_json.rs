@@ -249,7 +249,7 @@ fn process_json(
                 bid.block_hash = log_entry.message.blockHash.clone();
                 bid.parent_hash = log_entry.message.parentHash.clone();
                 bid.ua = log_entry.message.ua.clone();
-                bid.relay = log_entry.message.url.as_deref().unwrap_or("").to_string();
+                bid.relay = log_entry.message.url.as_deref().unwrap_or("").to_string(); // This is where you emulate missing URL for old data
                 bid.pubkey = log_entry
                     .message
                     .pubkey
