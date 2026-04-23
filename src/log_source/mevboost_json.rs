@@ -894,20 +894,28 @@ fn host_from(relay: &str) -> String {
 
 // ----------------------- Relay CSV bid lookup --------------------------
 
-/// Keys are `(slot, block_hash, value_normalized)` → relay label.
+/// Keys are `(slot, block_hash)` → relay label.
 /// Loaded from external relay-side getheader CSVs and used to label
 /// bids whose `relay` field is empty in the MEV-boost log.
 ///
 /// Value is `(relay_label, count)` where `count` is the number of times that
-/// `(slot, block_hash, value)` triple appeared in the CSV.  The backfill step
+/// `(slot, block_hash)` pair appeared in the CSV.  The backfill step
 /// consumes at most `count` matching log bids per key so that we never claim
 /// more bids than we actually sent.
-pub type RelayBidMap = HashMap<(String, String, rust_decimal::Decimal), (String, usize)>;
+///
+/// Note: `block_value` is intentionally excluded from the key because the DB
+/// stores it as a float64, causing last-digit precision drift vs the exact
+/// string in MEV-boost logs.  `(slot, block_hash)` is sufficient for
+/// unambiguous relay-proxy attribution.
+pub type RelayBidMap = HashMap<(String, String), (String, usize)>;
 
 /// Load a relay getheader CSV (columns: slot, block_hash, value) and build
-/// a `RelayBidMap`.  Duplicate rows for the same key increment the counter
-/// so that the backfill step can limit attribution to exactly the count of
-/// bids we sent.  Header row is expected and skipped automatically.
+/// a `RelayBidMap`.  The `value` column is present in the CSV but is ignored
+/// here because it is stored as float64 in the DB and suffers last-digit
+/// precision drift relative to MEV-boost log strings.  Duplicate rows for
+/// the same `(slot, block_hash)` key increment the counter so that the
+/// backfill step can limit attribution to exactly the count of bids we sent.
+/// Header row is expected and skipped automatically.
 pub fn load_relay_csv(path: &str, relay_label: &str) -> IoResult<RelayBidMap> {
     let mut map = RelayBidMap::new();
     let mut rdr = csv::Reader::from_path(path)
@@ -917,22 +925,10 @@ pub fn load_relay_csv(path: &str, relay_label: &str) -> IoResult<RelayBidMap> {
             Ok(record) => {
                 let slot = record.get(0).unwrap_or("").trim().to_string();
                 let block_hash = record.get(1).unwrap_or("").trim().to_string();
-                let value_str = record.get(2).unwrap_or("").trim();
-                if slot.is_empty() || block_hash.is_empty() || value_str.is_empty() {
+                if slot.is_empty() || block_hash.is_empty() {
                     continue;
                 }
-                let value_dec: Decimal = match value_str.parse() {
-                    Ok(d) => d,
-                    Err(_) => {
-                        eprintln!(
-                            "[relay-csv] Could not parse value '{}' — skipping row.",
-                            value_str
-                        );
-                        continue;
-                    }
-                };
-                // normalize() strips trailing zeros so 0.10 == 0.1 for hash/eq
-                let key = (slot, block_hash, value_dec.normalize());
+                let key = (slot, block_hash);
                 map.entry(key)
                     .and_modify(|(_, cnt)| *cnt += 1)
                     .or_insert((relay_label.to_string(), 1));
@@ -953,10 +949,10 @@ pub fn load_relay_csv(path: &str, relay_label: &str) -> IoResult<RelayBidMap> {
 
 /// For every bid whose `relay` field is still empty, look the bid up in
 /// `relay_map` (non-proxy relay) then `proxy_relay_map` (relay-proxy) by
-/// `(slot, block_hash, value)`.  At most `count` bids are labelled per
-/// composite key — matching the number of bids we actually sent according to
-/// the CSV — so bids from other relays that happen to share the same
-/// slot/hash/value are left unlabelled.
+/// `(slot, block_hash)`.  At most `count` bids are labelled per key —
+/// matching the number of bids we actually sent according to the CSV — so
+/// bids from other relays that happen to share the same slot/hash are left
+/// unlabelled.
 fn backfill_relay_from_csv(
     slot_infos: &mut SlotInfos,
     relay_map: &RelayBidMap,
@@ -968,7 +964,7 @@ fn backfill_relay_from_csv(
 
     // Track how many claims have been made per key across ALL slot_infos.
     // Keys are shared between both maps; relay_map is checked first.
-    let mut remaining: HashMap<(String, String, Decimal), usize> = HashMap::new();
+    let mut remaining: HashMap<(String, String), usize> = HashMap::new();
     for (key, (_, cnt)) in relay_map.iter().chain(proxy_relay_map.iter()) {
         *remaining.entry(key.clone()).or_insert(0) += cnt;
     }
@@ -987,11 +983,7 @@ fn backfill_relay_from_csv(
                 if !bid.relay.is_empty() {
                     continue; // already labelled — keep existing attribution
                 }
-                let key = (
-                    bid.slot.clone(),
-                    bid.block_hash.clone(),
-                    bid.bid_value.normalize(),
-                );
+                let key = (bid.slot.clone(), bid.block_hash.clone());
                 // Check remaining budget for this key.
                 let budget = remaining.get_mut(&key);
                 if let Some(rem) = budget {
