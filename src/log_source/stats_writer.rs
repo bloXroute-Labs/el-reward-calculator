@@ -1,24 +1,24 @@
-use csv::WriterBuilder;
-use crate::SlotInfo;
 use crate::log_source::types::{CommitBoostSlotInfo, SlotInfoWithoutBids};
+use crate::SlotInfo;
+use chrono::Local; // local time for filenames
+use csv::WriterBuilder;
 use ethers::types::U256;
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use serde::Serialize;
+use serde_json::{self, to_string_pretty};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::{self, File};
-use std::io::{Write, Result as IoResult};
-use rust_decimal::Decimal;
-use rust_decimal_macros::dec;
-use serde_json::{self, to_string_pretty};
-use chrono::Local; // local time for filenames
-use url::Url;      // NEW: for host normalization
+use std::io::{Result as IoResult, Write};
+use url::Url; // NEW: for host normalization
 
 /// Local timestamp helper
 fn local_stamp() -> (String, String) {
     let now = Local::now();
-    let date_str = now.format("%Y-%m-%d").to_string();     // e.g. 2025-08-15
-    let time_str = now.format("%Hh_%Mm_%Ss").to_string();  // e.g. 17h_25m_05s
+    let date_str = now.format("%Y-%m-%d").to_string(); // e.g. 2025-08-15
+    let time_str = now.format("%Hh_%Mm_%Ss").to_string(); // e.g. 17h_25m_05s
     (date_str, time_str)
 }
 
@@ -32,7 +32,11 @@ fn normalize_host_field(raw: &str) -> String {
     }
     // handle strings like host/path or scheme-less leftovers
     if let Some(after_scheme) = trimmed.split("://").nth(1) {
-        return after_scheme.split('/').next().unwrap_or(after_scheme).to_string();
+        return after_scheme
+            .split('/')
+            .next()
+            .unwrap_or(after_scheme)
+            .to_string();
     }
     // maybe already just a host
     trimmed.split('/').next().unwrap_or(trimmed).to_string()
@@ -66,51 +70,135 @@ pub trait RewardStats: Clone {
 }
 
 impl RewardStats for SlotInfo {
-    fn get_uid(&self) -> &str { &self.slot_uid }
-    fn get_slot(&self) -> &str { &self.slot }
-    fn get_block_number(&self) -> &str { &self.block_number }
-    fn get_block_hash(&self) -> &str { &self.info.block_hash }
-    fn get_header_start(&self) -> i64 { self.info.header_start_ms_into_slot }
-    fn get_payload_start(&self) -> i64 { self.info.payload_start_ms_into_slot }
-    fn get_onchain_bid_value(&self) -> Decimal { self.onchain_bid_value }
-    fn get_el_reward_eth(&self) -> Decimal { self.el_reward_increase_eth }
-    fn get_el_reward_wei(&self) -> U256 { self.el_reward_increase_wei.clone() }
-    fn get_is_proxy_win(&self) -> bool { self.is_proxy_win }
-    fn get_is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
-    fn get_second_highest_bid_value(&self) -> Decimal { self.second_highest_bid_value }
-    fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
-    fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
-    fn get_is_payload_received(&self) -> bool { self.is_payload_received }
-    fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
-    fn get_el_reward_precise(&self) -> Decimal { self.el_reward_increase_percent_precise }
-    fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
-    fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
-    fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
-    fn get_slot_start_time(&self) -> &str { &self.time }
+    fn get_uid(&self) -> &str {
+        &self.slot_uid
+    }
+    fn get_slot(&self) -> &str {
+        &self.slot
+    }
+    fn get_block_number(&self) -> &str {
+        &self.block_number
+    }
+    fn get_block_hash(&self) -> &str {
+        &self.info.block_hash
+    }
+    fn get_header_start(&self) -> i64 {
+        self.info.header_start_ms_into_slot
+    }
+    fn get_payload_start(&self) -> i64 {
+        self.info.payload_start_ms_into_slot
+    }
+    fn get_onchain_bid_value(&self) -> Decimal {
+        self.onchain_bid_value
+    }
+    fn get_el_reward_eth(&self) -> Decimal {
+        self.el_reward_increase_eth
+    }
+    fn get_el_reward_wei(&self) -> U256 {
+        self.el_reward_increase_wei.clone()
+    }
+    fn get_is_proxy_win(&self) -> bool {
+        self.is_proxy_win
+    }
+    fn get_is_winning_bid_highest(&self) -> bool {
+        self.is_winning_bid_highest
+    }
+    fn get_second_highest_bid_value(&self) -> Decimal {
+        self.second_highest_bid_value
+    }
+    fn get_second_higher_bid_delivered_relay(&self) -> &str {
+        &self.second_higher_bid_delivered_relay
+    }
+    fn get_onchain_bid_delivered_relay(&self) -> &str {
+        &self.onchain_bid_delivered_relay
+    }
+    fn get_is_payload_received(&self) -> bool {
+        self.is_payload_received
+    }
+    fn get_el_reward_percentage(&self) -> u64 {
+        self.el_reward_increase_percentage
+    }
+    fn get_el_reward_precise(&self) -> Decimal {
+        self.el_reward_increase_percent_precise
+    }
+    fn get_equal_to_proxy_bidders(&self) -> &str {
+        &self.equal_to_proxy_bidders
+    }
+    fn is_equal_to_proxy_bid(&self) -> bool {
+        self.is_equal_to_proxy_bid
+    }
+    fn get_fee_per_block(&self) -> Decimal {
+        self.fee_per_block
+    }
+    fn get_slot_start_time(&self) -> &str {
+        &self.time
+    }
 }
 
 impl RewardStats for CommitBoostSlotInfo {
-    fn get_uid(&self) -> &str { &self.slot_uid }
-    fn get_slot(&self) -> &str { &self.slot }
-    fn get_block_number(&self) -> &str { &self.block_number }
-    fn get_block_hash(&self) -> &str { &self.block_hash }
-    fn get_header_start(&self) -> i64 { 0 }
-    fn get_payload_start(&self) -> i64 { 0 }
-    fn get_onchain_bid_value(&self) -> Decimal { self.onchain_bid_value }
-    fn get_el_reward_eth(&self) -> Decimal { self.el_reward_increase_eth }
-    fn get_el_reward_wei(&self) -> U256 { self.el_reward_increase_wei.clone() }
-    fn get_is_proxy_win(&self) -> bool { self.is_proxy_win }
-    fn get_is_winning_bid_highest(&self) -> bool { self.is_winning_bid_highest }
-    fn get_second_highest_bid_value(&self) -> Decimal { self.second_highest_bid_value }
-    fn get_second_higher_bid_delivered_relay(&self) -> &str { &self.second_higher_bid_delivered_relay }
-    fn get_onchain_bid_delivered_relay(&self) -> &str { &self.onchain_bid_delivered_relay }
-    fn get_is_payload_received(&self) -> bool { self.is_payload_received }
-    fn get_el_reward_percentage(&self) -> u64 { self.el_reward_increase_percentage }
-    fn get_el_reward_precise(&self) -> Decimal { self.el_reward_increase_percent_precise }
-    fn get_equal_to_proxy_bidders(&self) -> &str { &self.equal_to_proxy_bidders }
-    fn is_equal_to_proxy_bid(&self) -> bool { self.is_equal_to_proxy_bid }
-    fn get_fee_per_block(&self) -> Decimal { self.fee_per_block }
-    fn get_slot_start_time(&self) -> &str { &self.time }
+    fn get_uid(&self) -> &str {
+        &self.slot_uid
+    }
+    fn get_slot(&self) -> &str {
+        &self.slot
+    }
+    fn get_block_number(&self) -> &str {
+        &self.block_number
+    }
+    fn get_block_hash(&self) -> &str {
+        &self.block_hash
+    }
+    fn get_header_start(&self) -> i64 {
+        0
+    }
+    fn get_payload_start(&self) -> i64 {
+        0
+    }
+    fn get_onchain_bid_value(&self) -> Decimal {
+        self.onchain_bid_value
+    }
+    fn get_el_reward_eth(&self) -> Decimal {
+        self.el_reward_increase_eth
+    }
+    fn get_el_reward_wei(&self) -> U256 {
+        self.el_reward_increase_wei.clone()
+    }
+    fn get_is_proxy_win(&self) -> bool {
+        self.is_proxy_win
+    }
+    fn get_is_winning_bid_highest(&self) -> bool {
+        self.is_winning_bid_highest
+    }
+    fn get_second_highest_bid_value(&self) -> Decimal {
+        self.second_highest_bid_value
+    }
+    fn get_second_higher_bid_delivered_relay(&self) -> &str {
+        &self.second_higher_bid_delivered_relay
+    }
+    fn get_onchain_bid_delivered_relay(&self) -> &str {
+        &self.onchain_bid_delivered_relay
+    }
+    fn get_is_payload_received(&self) -> bool {
+        self.is_payload_received
+    }
+    fn get_el_reward_percentage(&self) -> u64 {
+        self.el_reward_increase_percentage
+    }
+    fn get_el_reward_precise(&self) -> Decimal {
+        self.el_reward_increase_percent_precise
+    }
+    fn get_equal_to_proxy_bidders(&self) -> &str {
+        &self.equal_to_proxy_bidders
+    }
+    fn is_equal_to_proxy_bid(&self) -> bool {
+        self.is_equal_to_proxy_bid
+    }
+    fn get_fee_per_block(&self) -> Decimal {
+        self.fee_per_block
+    }
+    fn get_slot_start_time(&self) -> &str {
+        &self.time
+    }
 }
 
 /// Select exactly one UID per slot deterministically:
@@ -133,10 +221,9 @@ where
         let mut candidates: Vec<&T> = uid_map.values().collect();
 
         // 0) keep only meaningful, resolved entries
-        candidates.retain(|c|
-            !c.get_block_hash().is_empty() &&
-            c.get_onchain_bid_value() > Decimal::ZERO
-        );
+        candidates.retain(|c| {
+            !c.get_block_hash().is_empty() && c.get_onchain_bid_value() > Decimal::ZERO
+        });
 
         if candidates.is_empty() {
             continue;
@@ -147,34 +234,49 @@ where
             let a_pref = a.get_is_proxy_win() && a.get_el_reward_eth() > Decimal::ZERO;
             let b_pref = b.get_is_proxy_win() && b.get_el_reward_eth() > Decimal::ZERO;
             if a_pref != b_pref {
-                return if b_pref { Ordering::Greater } else { Ordering::Less };
+                return if b_pref {
+                    Ordering::Greater
+                } else {
+                    Ordering::Less
+                };
             }
 
             // (2) higher uplift first
-            match b.get_el_reward_eth()
+            match b
+                .get_el_reward_eth()
                 .partial_cmp(&a.get_el_reward_eth())
                 .unwrap_or(Ordering::Equal)
             {
-                Ordering::Less    => return Ordering::Less,
+                Ordering::Less => return Ordering::Less,
                 Ordering::Greater => return Ordering::Greater,
-                Ordering::Equal   => {}
+                Ordering::Equal => {}
             }
 
             // (3) payload received preferred
-            let ord = b.get_is_payload_received().cmp(&a.get_is_payload_received());
-            if ord != Ordering::Equal { return ord; }
+            let ord = b
+                .get_is_payload_received()
+                .cmp(&a.get_is_payload_received());
+            if ord != Ordering::Equal {
+                return ord;
+            }
 
             // (4) earlier payload start
             let ord = a.get_payload_start().cmp(&b.get_payload_start());
-            if ord != Ordering::Equal { return ord; }
+            if ord != Ordering::Equal {
+                return ord;
+            }
 
             // (5) earlier header start
             let ord = a.get_header_start().cmp(&b.get_header_start());
-            if ord != Ordering::Equal { return ord; }
+            if ord != Ordering::Equal {
+                return ord;
+            }
 
             // (6) stable tie-breaks
             let ord = a.get_block_hash().cmp(b.get_block_hash());
-            if ord != Ordering::Equal { return ord; }
+            if ord != Ordering::Equal {
+                return ord;
+            }
             a.get_uid().cmp(b.get_uid())
         });
 
@@ -188,9 +290,7 @@ where
 
 /// Collapse any flat map keyed by slot_uid into one record per *slot*.
 /// (Kept for compatibility—safe even when map is already per-slot.)
-pub fn coalesce_by_slot_generic<T>(
-    selected_infos: &HashMap<String, T>,
-) -> HashMap<String, T>
+pub fn coalesce_by_slot_generic<T>(selected_infos: &HashMap<String, T>) -> HashMap<String, T>
 where
     T: RewardStats + Clone + Debug,
 {
@@ -202,13 +302,19 @@ where
         per_slot
             .entry(slot_key)
             .and_modify(|existing| {
-                let existing_is_valid = existing.get_is_proxy_win() && existing.get_el_reward_eth() > Decimal::ZERO;
-                let incoming_is_valid = info.get_is_proxy_win() && info.get_el_reward_eth() > Decimal::ZERO;
+                let existing_is_valid =
+                    existing.get_is_proxy_win() && existing.get_el_reward_eth() > Decimal::ZERO;
+                let incoming_is_valid =
+                    info.get_is_proxy_win() && info.get_el_reward_eth() > Decimal::ZERO;
 
                 let take_incoming = match (existing_is_valid, incoming_is_valid) {
                     (false, true) => true,
                     (true, false) => false,
-                    (true, true) => match info.get_el_reward_eth().partial_cmp(&existing.get_el_reward_eth()).unwrap_or(Ordering::Equal) {
+                    (true, true) => match info
+                        .get_el_reward_eth()
+                        .partial_cmp(&existing.get_el_reward_eth())
+                        .unwrap_or(Ordering::Equal)
+                    {
                         Ordering::Greater => true,
                         Ordering::Equal => {
                             // add stable tie-break on block_hash too if you want:
@@ -250,7 +356,8 @@ pub fn write_csv_generic<T: RewardStats>(
     for (_slot_key, slot_info) in slot_infos {
         // Clean relay fields for CSV readability
         let delivered = normalize_host_field(slot_info.get_onchain_bid_delivered_relay());
-        let second_delivered = normalize_host_field(slot_info.get_second_higher_bid_delivered_relay());
+        let second_delivered =
+            normalize_host_field(slot_info.get_second_higher_bid_delivered_relay());
 
         let record = SlotInfoWithoutBids {
             time: slot_info.get_slot_start_time(),
@@ -318,7 +425,10 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     _date_str: &str,
     _time_str: &str,
     _all_infos: &[T],
-    skipped_infos:  &HashMap<String, Vec<(String, T, Vec<&'static str>)>>,
+    skipped_infos: &HashMap<String, Vec<(String, T, Vec<&'static str>)>>,
+    missing_best_bid_slots: usize,
+    min_time: &str,
+    max_time: &str,
 ) -> std::io::Result<()> {
     use std::io::Write;
 
@@ -328,8 +438,10 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     let per_slot = coalesce_by_slot_generic(selected_infos);
 
     // Counts
-    let per_slot_set: std::collections::HashSet<String> =
-        per_slot.values().map(|i| i.get_slot().to_string()).collect();
+    let per_slot_set: std::collections::HashSet<String> = per_slot
+        .values()
+        .map(|i| i.get_slot().to_string())
+        .collect();
     let skipped_slot_set: std::collections::HashSet<String> =
         skipped_infos.keys().cloned().collect();
 
@@ -348,7 +460,10 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     let mut reward_improvement_eth = Decimal::ZERO;
     let mut total_fee_per_block_eth = Decimal::ZERO;
 
-    println!("Total slot_infos parsed_before (slot_uids): {}", total_slot_uids);
+    println!(
+        "Total slot_infos parsed_before (slot_uids): {}",
+        total_slot_uids
+    );
 
     let mut sorted_infos: Vec<_> = per_slot.values().collect();
     sorted_infos.sort_by(|a, b| a.get_uid().cmp(&b.get_uid()));
@@ -376,47 +491,116 @@ pub fn write_summary_generic<T: RewardStats + std::fmt::Debug + Serialize>(
     let summary_path = format!("{}/summary_{}_{}.txt", folder_path, date_str, time_str);
     let mut file = File::create(&summary_path)?;
 
-    writeln!(file, "--------------------------------------------------------")?;
+    writeln!(
+        file,
+        "--------------------------------------------------------"
+    )?;
     writeln!(file, "Total slots parsed : {}", total_slots_parsed)?;
-    writeln!(file, "Total Slot UIDs(single slot contain multiple UIDs): {}", total_slot_uids)?;
-    writeln!(file, "Skipped slot : {} (refer skipped slots file for reason)", skipped_slots_count)?;
+    writeln!(
+        file,
+        "Total Slot UIDs(single slot contain multiple UIDs): {}",
+        total_slot_uids
+    )?;
+    writeln!(
+        file,
+        "Skipped slot : {} (refer skipped slots file for reason)",
+        skipped_slots_count
+    )?;
+    if missing_best_bid_slots > 0 {
+        writeln!(
+            file,
+            "Slots with missing best-bid log entry            : {}",
+            missing_best_bid_slots
+        )?;
+    }
+    if !min_time.is_empty() || !max_time.is_empty() {
+        writeln!(file, "Log date range  : {} → {}", min_time, max_time)?;
+    }
     writeln!(file, "")?;
 
-    writeln!(file, "--------------------------------------------------------")?;
-    writeln!(file, "Total Slots(considered for calculation)            : {}", total_slots_considered)?;
-    writeln!(file, "total eth overall      : {:.18} ETH", total_eth_overall)?;
+    writeln!(
+        file,
+        "--------------------------------------------------------"
+    )?;
+    writeln!(
+        file,
+        "Total Slots(considered for calculation)            : {}",
+        total_slots_considered
+    )?;
+    writeln!(
+        file,
+        "total eth overall      : {:.18} ETH",
+        total_eth_overall
+    )?;
     writeln!(file, "Slots won by Rproxy    : {}", slots_won_by_rproxy)?;
-    writeln!(file, "total eth (Rproxy slots): {:.18} ETH", total_eth_rproxy)?;
-    writeln!(file, "EL reward improvement  : {:.18} ETH", reward_improvement_eth)?;
+    writeln!(
+        file,
+        "total eth (Rproxy slots): {:.18} ETH",
+        total_eth_rproxy
+    )?;
+    writeln!(
+        file,
+        "EL reward improvement  : {:.18} ETH",
+        reward_improvement_eth
+    )?;
     writeln!(
         file,
         "Improvement percentage : ({:.18} / {:.18}) × 100 ≈ {:.18}%",
-        reward_improvement_eth,
-        total_eth_rproxy,
-        improvement_percentage
+        reward_improvement_eth, total_eth_rproxy, improvement_percentage
     )?;
     writeln!(file, "50% Owed to BLXR       : {:.18} ETH", owed_to_blxr)?;
-    writeln!(file, "Total fee per block    : {:.18} ETH", total_fee_per_block_eth)?;
-    writeln!(file, "--------------------------------------------------------")?;
+    writeln!(
+        file,
+        "Total fee per block    : {:.18} ETH",
+        total_fee_per_block_eth
+    )?;
+    writeln!(
+        file,
+        "--------------------------------------------------------"
+    )?;
 
     // Mirror to stdout
     println!("-----------------------------------------------------------");
     println!("Total slots parsed : {}", total_slots_parsed);
-    println!("Total Slot UIDs(single slot contain multiple UIDs): {}", total_slot_uids);
-    println!("Skipped slots : {} (refer skipped slots file for reason)", skipped_slots_count);
+    println!(
+        "Total Slot UIDs(single slot contain multiple UIDs): {}",
+        total_slot_uids
+    );
+    println!(
+        "Skipped slots : {} (refer skipped slots file for reason)",
+        skipped_slots_count
+    );
+    if missing_best_bid_slots > 0 {
+        println!(
+            "Slots with missing best-bid log entry            : {}",
+            missing_best_bid_slots
+        );
+    }
+    if !min_time.is_empty() || !max_time.is_empty() {
+        println!("Log date range  : {} → {}", min_time, max_time);
+    }
     println!("-----------------------------------------------------------");
 
-    println!("Total Slots(considered for calculation): {}", total_slots_considered);
+    println!(
+        "Total Slots(considered for calculation): {}",
+        total_slots_considered
+    );
     println!("total eth overall         : {:.18} ETH", total_eth_overall);
     println!("Slots won by Rproxy       : {}", slots_won_by_rproxy);
     println!("total eth (Rproxy slots)  : {:.18} ETH", total_eth_rproxy);
-    println!("EL reward improvement     : {:.18} ETH", reward_improvement_eth);
+    println!(
+        "EL reward improvement     : {:.18} ETH",
+        reward_improvement_eth
+    );
     println!(
         "Improvement percentage    : ({:.18} / {:.18}) × 100 ≈ {:.18}%",
         reward_improvement_eth, total_eth_rproxy, improvement_percentage
     );
     println!("50% Owed to BLXR         : {:.18} ETH", owed_to_blxr);
-    println!("Total fee per block       : {:.18} ETH", total_fee_per_block_eth);
+    println!(
+        "Total fee per block       : {:.18} ETH",
+        total_fee_per_block_eth
+    );
     println!("-----------------------------------------------------------");
 
     // Skipped infos

@@ -1,26 +1,107 @@
+use crate::log_source::common::{get_slot_start_time_utc, is_relay_proxy};
 use crate::log_source::types::{Bid, LogEntry};
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 use crate::{SlotInfo, SlotInfos};
 use chrono::{DateTime, SecondsFormat, Utc};
-use url::Url;
 use ethers::types::U256;
-use crate::log_source::common::{is_relay_proxy, get_slot_start_time_utc};
-use serde_json::{self, Deserializer, Value};
+use log::debug;
+use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use serde_json::{self, Deserializer, Value};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::{self, File};
-use std::io::{Result as IoResult, Write};
-use log::debug;
+use std::io::{ErrorKind, Result as IoResult, Write};
+use url::Url;
 
-pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfos) {
+/// Metadata collected from a `"best bid"` log entry for a proxy-built block.
+///
+/// `proxy_url`       — the proxy relay URL that appeared in `relays`.
+/// `nonproxy_hosts`  — host names of any non-proxy relays that also appeared
+///                     in `relays` (non-empty means the block was co-proposed
+///                     and the slot is a tie, not a pure proxy win).
+#[derive(Debug, Clone)]
+struct BestBidInfo {
+    proxy_url: String,
+    nonproxy_hosts: Vec<String>,
+}
+
+impl BestBidInfo {
+    fn has_nonproxy(&self) -> bool {
+        !self.nonproxy_hosts.is_empty()
+    }
+}
+
+/// Returns `(missing_best_bid_slots, min_time, max_time)`.
+/// `min_time` / `max_time` are the earliest and latest RFC3339 timestamps
+/// seen in the log; both are empty strings when the file contains no entries.
+pub fn parse_file_content<R: std::io::Read>(
+    reader: R,
+    slot_infos: &mut SlotInfos,
+    relay_map: &RelayBidMap,
+    proxy_relay_map: &RelayBidMap,
+) -> (usize, String, String) {
+    // Maps (block_hash, tx_root) -> proxy_url, populated from "best bid" entries
+    // where at least one relay in the `relays` field is a relay-proxy.
+    //
+    // "best bid" lists the relays that actually *proposed* (built) the winning
+    // block — unlike "calling getPayload" which is broadcast to ALL relays and
+    // therefore cannot identify who built the block.
+    //
+    // The composite (block_hash, tx_root) key is used instead of block_hash alone
+    // for extra precision, since both fields are present in "bid received" entries
+    // and in "best bid" entries.
+    //
+    // MEV-boost >= v1.11.1 dropped url from "bid received" log lines, so
+    // bid.relay is empty for all bids.  This map is used post-stream to
+    // backfill the relay field only for bids whose block was proxy-built.
+    let mut best_bid_proxy_hashes: HashMap<(String, String), BestBidInfo> = HashMap::new();
+    // Slot numbers that have at least one "best bid" log entry (any relay).
+    // Used to detect slot_uids where MEV-boost never emitted a "best bid".
+    let mut best_bid_slots: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let mut min_time: Option<String> = None;
+    let mut max_time: Option<String> = None;
+
+    // Update the running min/max with a single timestamp string.
+    let mut update_time_range = |t: &str| {
+        if t.is_empty() {
+            return;
+        }
+        min_time = Some(match min_time.take() {
+            None => t.to_owned(),
+            Some(prev) => {
+                if t < prev.as_str() {
+                    t.to_owned()
+                } else {
+                    prev
+                }
+            }
+        });
+        max_time = Some(match max_time.take() {
+            None => t.to_owned(),
+            Some(prev) => {
+                if t > prev.as_str() {
+                    t.to_owned()
+                } else {
+                    prev
+                }
+            }
+        });
+    };
+
     let stream = Deserializer::from_reader(reader).into_iter::<Value>();
     for entry in stream {
         match entry {
             Ok(Value::Object(map)) => {
                 match serde_json::from_value::<LogEntry>(Value::Object(map)) {
                     Ok(log_entry) => {
-                        process_json(&log_entry, slot_infos);
+                        update_time_range(&log_entry.message.time.clone());
+                        process_json(
+                            &log_entry,
+                            slot_infos,
+                            &mut best_bid_proxy_hashes,
+                            &mut best_bid_slots,
+                        );
                     }
                     Err(e) => eprintln!("Failed to parse log entry: {}. Skipping.", e),
                 }
@@ -32,7 +113,15 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfo
             Ok(Value::Array(vec)) => {
                 for item in vec {
                     match serde_json::from_value::<LogEntry>(item) {
-                        Ok(log_entry) => process_json(&log_entry, slot_infos),
+                        Ok(log_entry) => {
+                            update_time_range(&log_entry.message.time.clone());
+                            process_json(
+                                &log_entry,
+                                slot_infos,
+                                &mut best_bid_proxy_hashes,
+                                &mut best_bid_slots,
+                            );
+                        }
                         Err(e) => eprintln!("Failed to parse log entry: {}. Skipping.", e),
                     }
                 }
@@ -44,19 +133,94 @@ pub fn parse_file_content<R: std::io::Read>(reader: R, slot_infos: &mut SlotInfo
         }
     }
 
+    // Backfill bid.relay for any bid that still has an empty relay field,
+    // using block_hash as the key into best_bid_proxy_hashes.
+    backfill_proxy_relay(slot_infos, &best_bid_proxy_hashes);
+
+    // Supplement with relay-side CSV data: fills any bid.relay that is still
+    // empty after the "best bid" backfill above.
+    backfill_relay_from_csv(slot_infos, relay_map, proxy_relay_map);
+
+    // Count slot_uids where MEV-boost never emitted a "best bid" log entry
+    // for that slot number — indicating a log gap or MEV-boost restart.
+    let missing_best_bid_slots: usize = slot_infos
+        .iter()
+        .flat_map(|(slot, slot_map)| slot_map.values().map(move |_| slot))
+        .filter(|slot| !best_bid_slots.contains(*slot))
+        .count();
+
     // First, drop UIDs that never had any relay-proxy bid at all (diagnostic & cleanup).
     let _ = cleanup_slots_without_proxy(slot_infos);
 
     // Then compute per-slot classification, applying results strictly per-UID.
-    finalize_slot_infos(slot_infos);
+    finalize_slot_infos(slot_infos, &best_bid_proxy_hashes);
+
+    (
+        missing_best_bid_slots,
+        min_time.unwrap_or_default(),
+        max_time.unwrap_or_default(),
+    )
 }
 
 // ----------------------------- Parsing -------------------------------------
 
-fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
+fn process_json(
+    log_entry: &LogEntry,
+    slot_infos: &mut SlotInfos,
+    best_bid_proxy_hashes: &mut HashMap<(String, String), BestBidInfo>,
+    best_bid_slots: &mut std::collections::HashSet<String>,
+) {
     let slot = log_entry.message.slot.clone();
     let slot_uid = log_entry.message.slotUID.clone();
-
+    // "best bid" entries (and any future entry types) have no slotUID.
+    // Don't create a SlotInfo record for them; instead collect the proxy
+    // block-hash mapping we need for the backfill step.
+    if slot_uid.is_empty() {
+        if log_entry.message.method == "getHeader" && log_entry.message.msg == "best bid" {
+            let bh = &log_entry.message.blockHash;
+            let tx_root = log_entry.message.txRoot.as_deref().unwrap_or("");
+            // Record slot number in the all-best-bid set regardless of relay.
+            if !slot.is_empty() {
+                best_bid_slots.insert(slot.clone());
+            }
+            if let Some(relays_str) = &log_entry.message.relays {
+                // Scan ALL relays: collect the proxy URL and any non-proxy host
+                // names.  Both signals are needed to distinguish a clean proxy
+                // win from a co-proposed tie.
+                let mut found_proxy_url: Option<String> = None;
+                let mut nonproxy_hosts: Vec<String> = Vec::new();
+                for relay_url in relays_str.split(',') {
+                    let url = relay_url.trim();
+                    if url.is_empty() {
+                        continue;
+                    }
+                    if is_relay_proxy(url) {
+                        if found_proxy_url.is_none() {
+                            found_proxy_url = Some(url.to_string());
+                        }
+                    } else {
+                        nonproxy_hosts.push(host_from(url));
+                    }
+                }
+                if let Some(proxy_url) = found_proxy_url {
+                    if !bh.is_empty() {
+                        let key = (bh.clone(), tx_root.to_string());
+                        best_bid_proxy_hashes
+                            .entry(key)
+                            .or_insert_with(|| BestBidInfo {
+                                proxy_url: proxy_url.clone(),
+                                nonproxy_hosts: nonproxy_hosts.clone(),
+                            });
+                        debug!(
+                            "[BEST-BID] proxy proposed block_hash={} tx_root={} relay={} has_nonproxy={}",
+                            bh, tx_root, proxy_url, !nonproxy_hosts.is_empty()
+                        );
+                    }
+                }
+            }
+        }
+        return;
+    }
     let slot_info_map = slot_infos.entry(slot.clone()).or_insert_with(HashMap::new);
 
     // Ensure merging happens if slot_uid already exists
@@ -71,8 +235,8 @@ fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
                 let mut bid: Bid = Default::default();
 
                 // Timestamp -> epoch seconds
-                let date = DateTime::parse_from_rfc3339(&log_entry.message.time)
-                    .unwrap_or_else(|_| {
+                let date =
+                    DateTime::parse_from_rfc3339(&log_entry.message.time).unwrap_or_else(|_| {
                         panic!(
                             "failed to parse timestamp for slot-{}, timestamp-{}",
                             slot, log_entry.message.time
@@ -81,16 +245,29 @@ fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
                 let date_utc = date.with_timezone(&Utc);
                 bid.timestamp = date_utc.timestamp();
 
-                bid.slot         = log_entry.message.slot.clone();
-                bid.block_hash   = log_entry.message.blockHash.clone();
-                bid.parent_hash  = log_entry.message.parentHash.clone();
-                bid.ua           = log_entry.message.ua.clone();
-                bid.relay        = log_entry.message.url.as_deref().unwrap_or("").to_string();
-                bid.pubkey       = log_entry.message.pubkey.as_deref().unwrap_or("").to_string();
-                bid.block_number = log_entry.message.blockNumber
+                bid.slot = log_entry.message.slot.clone();
+                bid.block_hash = log_entry.message.blockHash.clone();
+                bid.parent_hash = log_entry.message.parentHash.clone();
+                bid.ua = log_entry.message.ua.clone();
+                bid.relay = log_entry.message.url.as_deref().unwrap_or("").to_string(); // This is where you emulate missing URL for old data
+                bid.pubkey = log_entry
+                    .message
+                    .pubkey
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_string();
+                bid.block_number = log_entry
+                    .message
+                    .blockNumber
                     .map_or(String::new(), |num| num.to_string());
-                bid.bid_value    = log_entry.message.value.as_deref().unwrap_or("0.0")
-                    .parse::<Decimal>().unwrap_or(Decimal::ZERO);
+                bid.bid_value = log_entry
+                    .message
+                    .value
+                    .as_deref()
+                    .unwrap_or("0.0")
+                    .parse::<Decimal>()
+                    .unwrap_or(Decimal::ZERO);
+                bid.tx_root = log_entry.message.txRoot.clone();
 
                 slot_info.info.bids.push(bid);
 
@@ -98,8 +275,10 @@ fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
                 // We only set block_hash from payload ("getPayload") lines.
             }
         }
-        "handleGetPayloadV2" | "getPayload"=> {
-            if log_entry.message.msg == "received payload from relay" || log_entry.message.msg == "calling getPayload"{
+        "handleGetPayloadV2" | "getPayload" => {
+            if log_entry.message.msg == "received payload from relay"
+                || log_entry.message.msg == "calling getPayload"
+            {
                 slot_info.is_payload_received = true;
 
                 // Treat payload blockHash as blinded and add to pending list.
@@ -110,7 +289,7 @@ fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
 
                 // Allow payload to set info.block_hash only if currently empty.
                 if slot_info.info.block_hash.is_empty() && !bh.is_empty() {
-                    slot_info.info.block_hash = bh;
+                    slot_info.info.block_hash = bh.clone();
                 }
 
                 // Opportunistically capture block number; block_hash stays payload-only.
@@ -128,13 +307,18 @@ fn process_json(log_entry: &LogEntry, slot_infos: &mut SlotInfos) {
 
 // --------------------------- Reconciliation --------------------------------
 
-pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
+fn finalize_slot_infos(
+    slot_infos: &mut SlotInfos,
+    best_bid_info: &HashMap<(String, String), BestBidInfo>,
+) {
     // Work slot-by-slot, then apply strictly per-UID.
     let mut slots: Vec<_> = slot_infos.keys().cloned().collect();
     slots.sort();
 
     for slot in slots {
-        let Some(slot_map) = slot_infos.get_mut(&slot) else { continue; };
+        let Some(slot_map) = slot_infos.get_mut(&slot) else {
+            continue;
+        };
 
         // Derive slot start time in RFC3339 (ms, Z) when missing.
         let slot_num_i64 = slot.parse::<i64>().unwrap_or_default();
@@ -151,6 +335,7 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
             relay: String,      // owned for safety
             host: String,       // normalized host
             block_hash: String, // blinded-ish (from headers, used only for matching)
+            tx_root: String,    // needed for best_bid_info lookup
             value: Decimal,
         }
 
@@ -158,12 +343,17 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
         let mut all_bids: Vec<BidView> = Vec::new();
         for (_uid, info) in slot_map.iter() {
             for b in &info.info.bids {
-                if b.block_hash.is_empty() { continue; }
-                if b.bid_value <= Decimal::ZERO { continue; }
+                if b.block_hash.is_empty() {
+                    continue;
+                }
+                if b.bid_value <= Decimal::ZERO {
+                    continue;
+                }
                 all_bids.push(BidView {
                     relay: b.relay.clone(),
-                    host:  host_from(&b.relay),
+                    host: host_from(&b.relay),
                     block_hash: b.block_hash.clone(),
+                    tx_root: b.tx_root.as_deref().unwrap_or("").to_string(),
                     value: b.bid_value,
                 });
             }
@@ -173,7 +363,9 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
         if all_bids.is_empty() {
             for (_uid, info) in slot_map.iter_mut() {
                 if !info.info.block_hash.is_empty()
-                    && !info.pending_blinded_block_hashes.contains(&info.info.block_hash)
+                    && !info
+                        .pending_blinded_block_hashes
+                        .contains(&info.info.block_hash)
                 {
                     debug!(
                         "[SANITY-EMPTY] Clearing non-blinded block_hash={} (slot {})",
@@ -200,7 +392,10 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
         }
 
         // ----- Per-slot "top" computation -----
-        let slot_top_value = all_bids.iter().map(|v| v.value).fold(Decimal::ZERO, Decimal::max);
+        let slot_top_value = all_bids
+            .iter()
+            .map(|v| v.value)
+            .fold(Decimal::ZERO, Decimal::max);
 
         let mut rproxy_at_top: Vec<&BidView> = Vec::new();
         let mut nonproxy_at_top_hosts: BTreeSet<String> = BTreeSet::new();
@@ -238,53 +433,134 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
             .cloned()
             .unwrap_or_default();
 
-        let slot_is_loss = !nonproxy_at_top_hosts.is_empty();
+        let mut slot_is_loss = !nonproxy_at_top_hosts.is_empty();
+
+        // Ground-truth override using "best bid".relays.
+        //
+        // Backfill sets bid.relay = proxy_url on EVERY "bid received" entry
+        // whose (block_hash, tx_root) matches a proxy-listed "best bid".  When
+        // the same block was co-proposed by a non-proxy relay, all copies of
+        // that bid look like proxy bids after backfill, so nonproxy_at_top_hosts
+        // ends up empty and bid-attribution alone would declare a proxy win.
+        //
+        // BestBidInfo.nonproxy_hosts captures this signal at parse time:
+        // if it is non-empty, the slot is a tie regardless of what per-bid
+        // relay fields say.
+        if !slot_is_loss && !rproxy_at_top.is_empty() {
+            let is_tie_from_best_bid = rproxy_at_top.iter().any(|v| {
+                best_bid_info
+                    .get(&(v.block_hash.clone(), v.tx_root.clone()))
+                    .map_or(false, |i| i.has_nonproxy())
+            });
+            if is_tie_from_best_bid {
+                slot_is_loss = true;
+                // Enrich nonproxy_at_top_hosts so that reporting fields
+                // (equal_to_proxy_bidders, onchain_bid_delivered_relay) are
+                // populated correctly even though backfill masked the non-proxy
+                // relay names in the per-bid relay field.
+                for v in &rproxy_at_top {
+                    if let Some(info) =
+                        best_bid_info.get(&(v.block_hash.clone(), v.tx_root.clone()))
+                    {
+                        for h in &info.nonproxy_hosts {
+                            nonproxy_at_top_hosts.insert(h.clone());
+                        }
+                    }
+                }
+                debug!(
+                    "[TIE-OVERRIDE] slot {} forced to loss via best_bid nonproxy_hosts: {:?}",
+                    slot, nonproxy_at_top_hosts
+                );
+            }
+        }
 
         // Deterministic proxy candidate when proxies win.
-        let (chosen_hash, chosen_proxy_host, uplift, uplift_wei, pct_precise, pct_rounded, fee_per_block) =
-            if !slot_is_loss && !rproxy_at_top.is_empty() {
-                let uplift = (slot_top_value - best_nonproxy_val).max(Decimal::ZERO);
-                let wei_multiplier = Decimal::from(1_000_000_000_000_000_000u128);
-                let uplift_wei_dec = (uplift * wei_multiplier).round();
-                let uplift_wei =
-                    U256::from_dec_str(&uplift_wei_dec.to_string()).unwrap_or_else(|_| U256::zero());
-                let pct_precise = if slot_top_value > Decimal::ZERO {
-                    (uplift / slot_top_value) * Decimal::from(100)
-                } else {
-                    Decimal::ZERO
-                };
-                let pct_rounded = pct_precise.round().to_u64().unwrap_or(0);
-
-                let mut rproxy_sorted = rproxy_at_top.clone();
-                rproxy_sorted.sort_by(|a, b| {
-                    let o = a.block_hash.cmp(&b.block_hash);
-                    if o != std::cmp::Ordering::Equal { return o; }
-                    a.host.cmp(&b.host)
-                });
-                let chosen = rproxy_sorted[0];
-
-                let fee = if pct_precise <= dec!(1) {
-                    dec!(0.0)
-                } else if pct_precise <= dec!(5) {
-                    if uplift >= dec!(0.0015) { dec!(0.0015) } else { dec!(0.0) }
-                } else if pct_precise <= dec!(9) {
-                    if uplift > dec!(0.003) { dec!(0.003) }
-                    else if uplift > dec!(0.0015) { dec!(0.0015) }
-                    else { dec!(0.0) }
-                } else {
-                    if uplift > dec!(0.005) { dec!(0.005) }
-                    else if uplift > dec!(0.003) { dec!(0.003) }
-                    else if uplift > dec!(0.0015) { dec!(0.0015) }
-                    else { dec!(0.0) }
-                };
-
-                (chosen.block_hash.clone(), chosen.host.clone(), uplift, uplift_wei, pct_precise, pct_rounded, fee)
+        let (
+            chosen_hash,
+            chosen_proxy_host,
+            uplift,
+            uplift_wei,
+            pct_precise,
+            pct_rounded,
+            fee_per_block,
+        ) = if !slot_is_loss && !rproxy_at_top.is_empty() {
+            let uplift = (slot_top_value - best_nonproxy_val).max(Decimal::ZERO);
+            let wei_multiplier = Decimal::from(1_000_000_000_000_000_000u128);
+            let uplift_wei_dec = (uplift * wei_multiplier).round();
+            let uplift_wei =
+                U256::from_dec_str(&uplift_wei_dec.to_string()).unwrap_or_else(|_| U256::zero());
+            let pct_precise = if slot_top_value > Decimal::ZERO {
+                (uplift / slot_top_value) * Decimal::from(100)
             } else {
-                (String::new(), String::new(), Decimal::ZERO, U256::zero(), Decimal::ZERO, 0u64, dec!(0.0))
+                Decimal::ZERO
+            };
+            let pct_rounded = pct_precise.round().to_u64().unwrap_or(0);
+
+            let mut rproxy_sorted = rproxy_at_top.clone();
+            rproxy_sorted.sort_by(|a, b| {
+                let o = a.block_hash.cmp(&b.block_hash);
+                if o != std::cmp::Ordering::Equal {
+                    return o;
+                }
+                a.host.cmp(&b.host)
+            });
+            let chosen = rproxy_sorted[0];
+
+            let fee = if pct_precise <= dec!(1) {
+                dec!(0.0)
+            } else if pct_precise <= dec!(5) {
+                if uplift >= dec!(0.0015) {
+                    dec!(0.0015)
+                } else {
+                    dec!(0.0)
+                }
+            } else if pct_precise <= dec!(9) {
+                if uplift > dec!(0.003) {
+                    dec!(0.003)
+                } else if uplift > dec!(0.0015) {
+                    dec!(0.0015)
+                } else {
+                    dec!(0.0)
+                }
+            } else {
+                if uplift > dec!(0.005) {
+                    dec!(0.005)
+                } else if uplift > dec!(0.003) {
+                    dec!(0.003)
+                } else if uplift > dec!(0.0015) {
+                    dec!(0.0015)
+                } else {
+                    dec!(0.0)
+                }
             };
 
+            (
+                chosen.block_hash.clone(),
+                chosen.host.clone(),
+                uplift,
+                uplift_wei,
+                pct_precise,
+                pct_rounded,
+                fee,
+            )
+        } else {
+            (
+                String::new(),
+                String::new(),
+                Decimal::ZERO,
+                U256::zero(),
+                Decimal::ZERO,
+                0u64,
+                dec!(0.0),
+            )
+        };
+
         // For "loss" reporting
-        let eq_nonproxy_join = nonproxy_at_top_hosts.iter().cloned().collect::<Vec<_>>().join(", ");
+        let eq_nonproxy_join = nonproxy_at_top_hosts
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
         let mut top_hosts_all: BTreeSet<String> = BTreeSet::new();
         for v in &all_bids {
             if v.value == slot_top_value {
@@ -297,7 +573,9 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
         for (_uid, info) in slot_map.iter_mut() {
             // Purge any non-blinded hash before writing results
             if !info.info.block_hash.is_empty()
-                && !info.pending_blinded_block_hashes.contains(&info.info.block_hash)
+                && !info
+                    .pending_blinded_block_hashes
+                    .contains(&info.info.block_hash)
             {
                 debug!(
                     "[SANITY] Clearing non-blinded block_hash={} (slot {}) before write",
@@ -313,7 +591,11 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 .collect();
 
             let has_header_match = !allowed.is_empty()
-                && info.info.bids.iter().any(|b| allowed.contains(b.block_hash.as_str()));
+                && info
+                    .info
+                    .bids
+                    .iter()
+                    .any(|b| allowed.contains(b.block_hash.as_str()));
 
             if !has_header_match {
                 // HARD SKIP for this UID
@@ -363,8 +645,12 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
                 {
                     info.info.block_hash = chosen_hash.clone();
                     // keep invariant explicit
-                    if !info.pending_blinded_block_hashes.contains(&info.info.block_hash) {
-                        info.pending_blinded_block_hashes.push(info.info.block_hash.clone());
+                    if !info
+                        .pending_blinded_block_hashes
+                        .contains(&info.info.block_hash)
+                    {
+                        info.pending_blinded_block_hashes
+                            .push(info.info.block_hash.clone());
                     }
                 } else if !chosen_hash.is_empty() {
                     debug!(
@@ -385,7 +671,9 @@ pub fn finalize_slot_infos(slot_infos: &mut SlotInfos) {
 
             // Final invariant: if a hash is set, it must be blinded (present in pending list).
             if !info.info.block_hash.is_empty()
-                && !info.pending_blinded_block_hashes.contains(&info.info.block_hash)
+                && !info
+                    .pending_blinded_block_hashes
+                    .contains(&info.info.block_hash)
             {
                 debug!(
                     "[SANITY-FINAL] Clearing non-blinded block_hash={} (slot {})",
@@ -436,6 +724,47 @@ impl SlotInfo {
     }
 }
 
+/// Backfill `bid.relay` for any bid whose relay is currently empty.
+///
+/// Uses `best_bid_proxy_hashes` ((block_hash, tx_root) → proxy_url) collected
+/// from `"best bid"` entries whose `relays` field lists at least one relay-proxy.
+///
+/// `"best bid".relays` lists only the relays that *built and proposed* the
+/// winning block — it is NOT a broadcast list.  This makes it the only
+/// reliable source for identifying proxy-built blocks in MEV-boost >= v1.11.1
+/// where the `url` field was removed from `"bid received"` log lines.
+///
+/// The composite (block_hash, tx_root) key adds an extra layer of precision
+/// over block_hash alone.
+///
+/// For older logs where `bid.relay` is already set, this function is a no-op
+/// for those bids.
+fn backfill_proxy_relay(
+    slot_infos: &mut SlotInfos,
+    best_bid_proxy_hashes: &HashMap<(String, String), BestBidInfo>,
+) {
+    if best_bid_proxy_hashes.is_empty() {
+        return;
+    }
+    for slot_map in slot_infos.values_mut() {
+        for (slot_uid, slot_info) in slot_map.iter_mut() {
+            for bid in slot_info.info.bids.iter_mut() {
+                if bid.relay.is_empty() && !bid.block_hash.is_empty() {
+                    let tx_root = bid.tx_root.as_deref().unwrap_or("");
+                    let key = (bid.block_hash.clone(), tx_root.to_string());
+                    if let Some(info) = best_bid_proxy_hashes.get(&key) {
+                        debug!(
+                            "[BACKFILL] slot_uid: {}, block_hash: {}, tx_root: {} -> relay: {}",
+                            slot_uid, bid.block_hash, tx_root, info.proxy_url
+                        );
+                        bid.relay = info.proxy_url.clone();
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Remove all slot_uids that have no relay-proxy bids, return them as a map, and write them to JSON.
 pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) -> IoResult<SlotInfos> {
     let mut total_slot_count = slot_infos.len();
@@ -449,7 +778,11 @@ pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) -> IoResult<SlotI
     for (slot, slot_map) in slot_infos.iter() {
         slots_checked += 1;
         for (slot_uid, slot_info) in slot_map.iter() {
-            let has_proxy_bid = slot_info.info.bids.iter().any(|bid| is_relay_proxy(&bid.relay));
+            let has_proxy_bid = slot_info
+                .info
+                .bids
+                .iter()
+                .any(|bid| is_relay_proxy(&bid.relay));
 
             if !has_proxy_bid {
                 println!(
@@ -513,12 +846,18 @@ pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) -> IoResult<SlotI
     fs::create_dir_all(&dir_path)?;
 
     let json_path = format!("{}nonproxy_slots_{}_{}.json", dir_path, date_str, time_str);
-    let summary_path = format!("{}nonproxy_slots_summary_{}_{}.txt", dir_path, date_str, time_str);
+    let summary_path = format!(
+        "{}nonproxy_slots_summary_{}_{}.txt",
+        dir_path, date_str, time_str
+    );
 
     // JSON dump
     let file = File::create(&json_path)?;
     serde_json::to_writer_pretty(file, &removed)?;
-    println!("[Cleanup] Wrote removed no-proxy entries to '{}'", json_path);
+    println!(
+        "[Cleanup] Wrote removed no-proxy entries to '{}'",
+        json_path
+    );
 
     // Small summary
     let removed_slots_count = removed.len();
@@ -528,9 +867,17 @@ pub fn cleanup_slots_without_proxy(slot_infos: &mut SlotInfos) -> IoResult<SlotI
     writeln!(sfile, "Removed (no relay-proxy bids) summary")?;
     writeln!(sfile, "-----------------------------------")?;
     writeln!(sfile, "Slots checked            : {}", slots_checked)?;
-    writeln!(sfile, "Slots before cleanup     : {}", total_slot_count + slots_removed)?;
+    writeln!(
+        sfile,
+        "Slots before cleanup     : {}",
+        total_slot_count + slots_removed
+    )?;
     writeln!(sfile, "Slots removed            : {}", slots_removed)?;
-    writeln!(sfile, "Slot UIDs removed        : {}", removed_slot_uids_count)?;
+    writeln!(
+        sfile,
+        "Slot UIDs removed        : {}",
+        removed_slot_uids_count
+    )?;
     writeln!(sfile, "Distinct slots removed   : {}", removed_slots_count)?;
     writeln!(sfile, "Remaining slots          : {}", total_slot_count)?;
     println!("[Cleanup] Wrote removed summary to '{}'", summary_path);
@@ -543,4 +890,124 @@ fn host_from(relay: &str) -> String {
         .ok()
         .and_then(|u| u.host_str().map(|s| s.to_string()))
         .unwrap_or_else(|| relay.to_string())
+}
+
+// ----------------------- Relay CSV bid lookup --------------------------
+
+/// Keys are `(slot, block_hash)` → relay label.
+/// Loaded from external relay-side getheader CSVs and used to label
+/// bids whose `relay` field is empty in the MEV-boost log.
+///
+/// Value is `(relay_label, count)` where `count` is the number of times that
+/// `(slot, block_hash)` pair appeared in the CSV.  The backfill step
+/// consumes at most `count` matching log bids per key so that we never claim
+/// more bids than we actually sent.
+///
+/// Note: `block_value` is intentionally excluded from the key because the DB
+/// stores it as a float64, causing last-digit precision drift vs the exact
+/// string in MEV-boost logs.  `(slot, block_hash)` is sufficient for
+/// unambiguous relay-proxy attribution.
+pub type RelayBidMap = HashMap<(String, String), (String, usize)>;
+
+/// Load a relay getheader CSV (columns: slot, block_hash, value) and build
+/// a `RelayBidMap`.  The `value` column is present in the CSV but is ignored
+/// here because it is stored as float64 in the DB and suffers last-digit
+/// precision drift relative to MEV-boost log strings.  Duplicate rows for
+/// the same `(slot, block_hash)` key increment the counter so that the
+/// backfill step can limit attribution to exactly the count of bids we sent.
+/// Header row is expected and skipped automatically.
+pub fn load_relay_csv(path: &str, relay_label: &str) -> IoResult<RelayBidMap> {
+    let mut map = RelayBidMap::new();
+    let mut rdr = csv::Reader::from_path(path)
+        .map_err(|e| std::io::Error::new(ErrorKind::Other, e.to_string()))?;
+    for result in rdr.records() {
+        match result {
+            Ok(record) => {
+                let slot = record.get(0).unwrap_or("").trim().to_string();
+                let block_hash = record.get(1).unwrap_or("").trim().to_string();
+                if slot.is_empty() || block_hash.is_empty() {
+                    continue;
+                }
+                let key = (slot, block_hash);
+                map.entry(key)
+                    .and_modify(|(_, cnt)| *cnt += 1)
+                    .or_insert((relay_label.to_string(), 1));
+            }
+            Err(e) => eprintln!("[relay-csv] Error reading row: {} — skipping.", e),
+        }
+    }
+    let total_rows: usize = map.values().map(|(_, c)| c).sum();
+    eprintln!(
+        "[relay-csv] Loaded {} rows ({} distinct keys) from '{}' (label={})",
+        total_rows,
+        map.len(),
+        path,
+        relay_label
+    );
+    Ok(map)
+}
+
+/// For every bid whose `relay` field is still empty, look the bid up in
+/// `relay_map` (non-proxy relay) then `proxy_relay_map` (relay-proxy) by
+/// `(slot, block_hash)`.  At most `count` bids are labelled per key —
+/// matching the number of bids we actually sent according to the CSV — so
+/// bids from other relays that happen to share the same slot/hash are left
+/// unlabelled.
+fn backfill_relay_from_csv(
+    slot_infos: &mut SlotInfos,
+    relay_map: &RelayBidMap,
+    proxy_relay_map: &RelayBidMap,
+) {
+    if relay_map.is_empty() && proxy_relay_map.is_empty() {
+        return;
+    }
+
+    // Track how many claims have been made per key across ALL slot_infos.
+    // Keys are shared between both maps; relay_map is checked first.
+    let mut remaining: HashMap<(String, String), usize> = HashMap::new();
+    for (key, (_, cnt)) in relay_map.iter().chain(proxy_relay_map.iter()) {
+        *remaining.entry(key.clone()).or_insert(0) += cnt;
+    }
+
+    let mut filled = 0usize;
+    // Iterate slots in sorted order for determinism.
+    let mut slots: Vec<String> = slot_infos.keys().cloned().collect();
+    slots.sort();
+    for slot in &slots {
+        let slot_map = slot_infos.get_mut(slot).unwrap();
+        let mut uids: Vec<String> = slot_map.keys().cloned().collect();
+        uids.sort();
+        for uid in &uids {
+            let info = slot_map.get_mut(uid).unwrap();
+            for bid in info.info.bids.iter_mut() {
+                if !bid.relay.is_empty() {
+                    continue; // already labelled — keep existing attribution
+                }
+                let key = (bid.slot.clone(), bid.block_hash.clone());
+                // Check remaining budget for this key.
+                let budget = remaining.get_mut(&key);
+                if let Some(rem) = budget {
+                    if *rem == 0 {
+                        continue; // quota exhausted for this key
+                    }
+                    // Determine label: relay_map takes priority over proxy_relay_map.
+                    let label = relay_map
+                        .get(&key)
+                        .or_else(|| proxy_relay_map.get(&key))
+                        .map(|(l, _)| l.clone());
+                    if let Some(label) = label {
+                        bid.relay = label;
+                        *rem -= 1;
+                        filled += 1;
+                    }
+                }
+            }
+        }
+    }
+    if filled > 0 {
+        eprintln!(
+            "[relay-csv] Backfilled relay label for {} bid(s) from relay CSVs.",
+            filled
+        );
+    }
 }
